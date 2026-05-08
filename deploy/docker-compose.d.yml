@@ -1,0 +1,59 @@
+name: jqdata-platform
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: jqdata-clickhouse
+    restart: unless-stopped
+    ports: ["8123:8123", "9000:9000"]
+    volumes: ["/data/clickhouse:/var/lib/clickhouse"]
+    ulimits: {nofile: {soft: 262144, hard: 262144}}
+    environment:
+      - CLICKHOUSE_DB=default
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    healthcheck:
+      test: ["CMD", "clickhouse-client", "-q", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [jqnet]
+
+  redis:
+    image: redis:7-alpine
+    container_name: jqdata-redis
+    restart: unless-stopped
+    ports: ["6379:6379"]
+    volumes: ["/data/redis:/data"]
+    command: redis-server --appendonly yes --maxmemory 4gb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [jqnet]
+
+  api:
+    image: jqdata-platform-api:latest
+    container_name: jqdata-api
+    restart: unless-stopped
+    ports: ["8000:8000"]
+    volumes: ["/data/jqdata-platform/src/main.py:/app/main.py:ro"]
+    environment:
+      - CH_HOST=clickhouse
+      - CH_DB=jqdata
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      clickhouse: {condition: service_healthy}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks: [jqnet]
+
+networks:
+  jqnet: {driver: bridge}

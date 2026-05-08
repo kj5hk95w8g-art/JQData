@@ -1,0 +1,20 @@
+name: jqdata-platform
+services:
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: jqdata-grafana
+    restart: unless-stopped
+    user: "472:472"
+    ports: ["3000:3000"]
+    volumes: ["/data/grafana:/var/lib/grafana"]
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks: [jqnet]
+networks:
+  jqnet: {driver: bridge}
