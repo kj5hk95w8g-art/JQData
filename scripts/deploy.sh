@@ -58,7 +58,7 @@ case "$SERVER" in
         echo ""
         echo "服务器定义:"
         echo "  a/A = 应用服务器    106.14.141.212  (禁止操作)"
-        echo "  b/B = 测试服务器    139.196.34.92   (保留现状)"
+        echo "  b/B = 测试服务器    139.196.34.92   (禁止修改)"
         echo "  c/C = 副本/可视化   139.196.186.67  (Grafana)"
         echo "  d/D = 核心数据层    101.132.161.52  (ClickHouse+Redis+API)"
         echo "  all = 部署C+D"

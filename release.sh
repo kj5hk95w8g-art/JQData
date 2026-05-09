@@ -56,7 +56,7 @@ case "$TARGET" in
         echo "[SKIP] A服务器为应用服务器，禁止通过release.sh部署"
         ;;
     b|B)
-        echo "[SKIP] B服务器为测试服务器，保留现有环境"
+        echo "[SKIP] B服务器为测试服务器，禁止修改"
         ;;
     d|D)
         deploy_server "d" "101.132.161.52" "核心数据层"
