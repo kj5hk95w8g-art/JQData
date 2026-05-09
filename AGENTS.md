@@ -215,5 +215,21 @@
 
 ---
 
-*最后更新：2026-05-08*  
-*版本：v1.0.0 — 初始版本，基于资产沃土 AGENTS.md v2.1.0 适配*
+## 附录C：SDK 发布
+
+**安装：**
+```bash
+pip install git+ssh://git@github.com:kj5hk95w8g-art/JQData.git#subdirectory=src/sdk
+```
+
+**用法：**
+```python
+import jqdata_sdk as jq
+jq.auth(api_key="your-key")
+df = jq.get_price("000001.XSHE", start_date="2020-01-01", end_date="2026-05-08")
+```
+
+---
+
+*最后更新：2026-05-09*  
+*版本：v2.0.0 — 增加 Python SDK、API Key 认证、批量查询端点*
