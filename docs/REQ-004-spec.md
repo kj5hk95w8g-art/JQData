@@ -87,24 +87,75 @@ pip install --upgrade git+ssh://git@github.com:kj5hk95w8g-art/JQData.git#subdire
 
 ## 四、团队成员接入流程
 
-```
-团队成员
-    │
-    ├── 1. 生成SSH key
-    │      ssh-keygen -t ed25519 -C "name@company.com"
-    │
-    ├── 2. 获取公钥
-    │      cat ~/.ssh/id_ed25519.pub
-    │
-    └── 3. 发邮件给你（仓库管理员）
-           主题：申请JQData SDK权限
-           内容：附上id_ed25519.pub的内容
+### 4.1 团队成员：生成SSH key
 
+**Mac/Linux 用户：**
+
+```bash
+# 1. 打开终端，执行以下命令（邮箱替换为自己的）
+ssh-keygen -t ed25519 -C "your_name@company.com"
+
+# 2. 提示保存位置时，直接回车（使用默认路径）
+#    Enter file in which to save the key (/Users/xxx/.ssh/id_ed25519):
+
+# 3. 提示输入密码时，直接回车（不设置密码，方便pip install）
+#    Enter passphrase (empty for no passphrase):
+#    Enter same passphrase again:
+
+# 4. 查看生成的公钥内容
+ cat ~/.ssh/id_ed25519.pub
+
+# 5. 复制输出的内容，类似下面这行：
+#    ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIxxx your_name@company.com
+```
+
+**Windows 用户：**
+
+```bash
+# 1. 打开 Git Bash 或 PowerShell，执行
+ssh-keygen -t ed25519 -C "your_name@company.com"
+
+# 2. 保存位置按回车默认
+# 3. 密码直接回车（不设置）
+
+# 4. 查看公钥
+ type %USERPROFILE%\.ssh\id_ed25519.pub
+
+# 5. 复制输出的完整内容
+```
+
+### 4.2 团队成员：发邮件申请
+
+**收件人：** 仓库管理员（你）  
+**主题：** 申请 JQData SDK 权限  
+**正文：**
+
+```
+您好，申请 JQData SDK 使用权限。
+
+姓名：张三
+部门：投资部
+邮箱：zhangsan@company.com
+
+SSH公钥内容如下：
+ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIxxx zhangsan@company.com
+
+谢谢！
+```
+
+### 4.3 管理员：开通权限
+
+```
 你（仓库管理员）
     │
-    └── 4. 登录GitHub → JQData仓库 Settings → Deploy keys
-           → Add deploy key → 粘贴公钥 → 不勾选Write access（只读即可）
-           → 回复邮件告知已开通
+    └── 1. 登录GitHub → JQData仓库 Settings → Deploy keys
+           → Add deploy key
+           → Title: 张三-投资部
+           → Key: 粘贴邮件中的公钥内容
+           → Allow write access: ❌ 不勾选（只读即可）
+           → Add key
+    │
+    └── 2. 回复邮件告知已开通，附安装命令
 ```
 
 ---
