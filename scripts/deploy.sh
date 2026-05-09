@@ -27,6 +27,14 @@ warn()      { echo -e "${YELLOW}[WARN]${NC} $1"; }
 info()      { echo -e "${BLUE}[INFO]${NC} $1"; }
 success()   { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 
+# 检测 compose 文件路径（兼容旧路径和 deploy/ 路径）
+COMPOSE_D=""
+COMPOSE_C=""
+[ -f "deploy/docker-compose.d.yml" ] && COMPOSE_D="deploy/docker-compose.d.yml"
+[ -f "docker-compose.d.yml" ] && COMPOSE_D="docker-compose.d.yml"
+[ -f "deploy/docker-compose.c.yml" ] && COMPOSE_C="deploy/docker-compose.c.yml"
+[ -f "docker-compose.c.yml" ] && COMPOSE_C="docker-compose.c.yml"
+
 # 保存当前版本（用于回滚）
 PREVIOUS=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
 
@@ -37,7 +45,6 @@ git fetch origin --tags
 if [ -n "$VERSION" ]; then
     info "部署指定版本: $VERSION"
     if ! git show-ref --tags "$VERSION" > /dev/null 2>&1; then
-        # 可能是远程tag，再fetch一次
         git fetch origin tag "$VERSION"
     fi
     git checkout "$VERSION"
@@ -54,11 +61,11 @@ fi
 # ---------- 2. 判断服务器角色并部署 ----------
 ROLLBACK=0
 
-if [ -f "docker-compose.d.yml" ]; then
+if [ -n "$COMPOSE_D" ]; then
     # D 服务器
-    info "检测到 D 服务器环境"
+    info "检测到 D 服务器环境（compose: $COMPOSE_D）"
     info "部署主服务..."
-    docker compose -f docker-compose.d.yml up -d
+    docker compose -f "$COMPOSE_D" up -d
     
     if [ -f "monitoring/docker-compose.monitoring.yml" ]; then
         info "部署监控栈..."
@@ -95,11 +102,11 @@ if [ -f "docker-compose.d.yml" ]; then
         docker ps --format "table {{.Names}}\t{{.Status}}" | grep jqdata
     fi
 
-elif [ -f "docker-compose.c.yml" ]; then
+elif [ -n "$COMPOSE_C" ]; then
     # C 服务器
-    info "检测到 C 服务器环境"
+    info "检测到 C 服务器环境（compose: $COMPOSE_C）"
     info "部署 Grafana..."
-    docker compose -f docker-compose.c.yml up -d
+    docker compose -f "$COMPOSE_C" up -d
     
     # 健康检查
     info "健康检查（等待5秒）..."
@@ -127,10 +134,10 @@ if [ "${ROLLBACK}" = "1" ]; then
     if [ -n "$PREVIOUS" ]; then
         warn "健康检查失败，回滚到上一个版本: $PREVIOUS"
         git checkout "$PREVIOUS"
-        if [ -f "docker-compose.d.yml" ]; then
-            docker compose -f docker-compose.d.yml up -d
-        elif [ -f "docker-compose.c.yml" ]; then
-            docker compose -f docker-compose.c.yml up -d
+        if [ -n "$COMPOSE_D" ]; then
+            docker compose -f "$COMPOSE_D" up -d
+        elif [ -n "$COMPOSE_C" ]; then
+            docker compose -f "$COMPOSE_C" up -d
         fi
         success "已回滚到 $PREVIOUS"
     else
