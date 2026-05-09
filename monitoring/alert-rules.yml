@@ -1,0 +1,61 @@
+# =============================================================================
+# Prometheus 告警规则（基础版）
+# 当前仅记录，未接 Alertmanager。异常指标可通过 Grafana 查看或脚本轮询。
+# =============================================================================
+groups:
+
+  - name: node-alerts
+    rules:
+      - alert: HighDiskUsage
+        expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "磁盘使用率超过90%"
+          description: "{{ $labels.instance }} 磁盘 {{ $labels.device }} 可用空间不足10%"
+
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "内存使用率超过90%"
+          description: "{{ $labels.instance }} 内存使用率 {{ $value | humanizePercentage }}"
+
+      - alert: NodeDown
+        expr: up{job="node-exporter"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "节点 exporter 不可达"
+
+  - name: container-alerts
+    rules:
+      - alert: ContainerDown
+        expr: up{job="cadvisor"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "cadvisor 不可达"
+
+      - alert: ContainerHighCpu
+        expr: rate(container_cpu_usage_seconds_total[5m]) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "容器CPU使用率过高"
+          description: "{{ $labels.name }} CPU使用率 {{ $value | humanizePercentage }}"
+
+      - alert: ContainerHighMemory
+        expr: container_memory_usage_bytes / container_spec_memory_limit_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "容器内存使用率过高"
+          description: "{{ $labels.name }} 内存使用率 {{ $value | humanizePercentage }}"
