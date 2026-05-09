@@ -23,7 +23,7 @@ check_d() {
     echo "--- Redis ---"
     docker exec jqdata-redis redis-cli ping 2>/dev/null || echo "FAIL"
     echo "--- API ---"
-    curl -sf http://localhost:8000/health 2>/dev/null || echo "FAIL"
+    curl -sf http://localhost:18080/health 2>/dev/null || echo "FAIL"
     echo "--- 数据量 ---"
     docker exec jqdata-clickhouse clickhouse-client -d jqdata -q "
         SELECT 'security_info', count() FROM security_info

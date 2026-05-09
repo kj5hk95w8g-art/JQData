@@ -66,11 +66,26 @@
 | `fix/xxx` | Bug 修复 | → `develop` |
 | `hotfix/xxx` | 紧急修复（数据异常、服务中断） | 从 `main` 切出，**必须同步到 `develop`** |
 
-**发版：** 在 `main` 执行版本 tag：`git tag vX.Y.Z && git push origin vX.Y.Z`
+**发版（本地执行）：**
+```bash
+./scripts/release.sh patch   # 或 minor / major
+```
+自动完成：版本号 bump → 更新 `version.txt` → commit → 打 tag → push
 
-**部署：**
-- 测试：合并到 `develop` 后，在 C/D 测试环境部署
-- 生产：基于 `main` tag，在 C/D 生产环境执行 `docker compose pull && docker compose up -d`
+**部署（SSH 登录服务器执行）：**
+```bash
+# D 服务器
+ssh root@101.132.161.52 'cd /data/jqdata-platform && ./scripts/deploy.sh v0.1.0'
+
+# C 服务器
+ssh root@139.196.186.67 'cd /data/jqdata-platform && ./scripts/deploy.sh v0.1.0'
+```
+自动完成：fetch tag → checkout → docker compose up -d → 健康检查 → 失败回滚
+
+**无 tag 紧急修复（不推荐）：**
+```bash
+ssh root@<服务器> 'cd /data/jqdata-platform && git fetch origin && git reset --hard origin/main && docker compose up -d'
+```
 
 **数据变更：** 表结构变更必须写成迁移脚本（`migrations/VXXX__description.sql`），禁止手动 `ALTER TABLE`。
 
