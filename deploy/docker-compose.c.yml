@@ -12,6 +12,11 @@ services:
     volumes: ["/data/grafana:/var/lib/grafana"]
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_SERVER_ENABLE_GZIP=true
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      - GF_SECURITY_ANGULAR_SUPPORT_ENABLED=false
+      - GF_NEWS_NEWS_FEED_ENABLED=false
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000/api/health"]
       interval: 15s
