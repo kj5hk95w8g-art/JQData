@@ -47,7 +47,7 @@ services:
     image: jqdata-platform-api:latest
     container_name: jqdata-api
     restart: unless-stopped
-    ports: ["18080:8000"]
+    expose: ["8000"]
     volumes: ["/data/jqdata-platform/src/main.py:/app/main.py:ro"]
     environment:
       - CH_HOST=clickhouse
@@ -64,6 +64,22 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+    networks: [jqnet]
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  nginx:
+    image: nginx:alpine
+    container_name: jqdata-nginx
+    restart: unless-stopped
+    ports: ["18080:18080"]
+    volumes:
+      - "/data/jqdata-platform/deploy/nginx.conf:/etc/nginx/nginx.conf:ro"
+    depends_on:
+      - api
     networks: [jqnet]
     logging:
       driver: "json-file"
