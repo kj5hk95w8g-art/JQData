@@ -37,7 +37,7 @@ services:
     image: jqdata-platform-api:latest
     container_name: jqdata-api
     restart: unless-stopped
-    ports: ["8000:8000"]
+    ports: ["18080:8000"]
     volumes: ["/data/jqdata-platform/src/main.py:/app/main.py:ro"]
     environment:
       - CH_HOST=clickhouse

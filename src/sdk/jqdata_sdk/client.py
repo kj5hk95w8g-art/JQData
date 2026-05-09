@@ -7,7 +7,7 @@ from .exceptions import APIError
 
 
 # ── 内置配置（硬编码）──
-DEFAULT_BASE_URL = "http://172.24.52.237:8000"
+DEFAULT_BASE_URL = "http://101.132.161.52:18080"
 SECRET_SALT = "yuntu-jqdata-2026-internal-only"
 
 
