@@ -6,41 +6,15 @@ from .utils import normalize_fields, rows_to_dataframe, to_jqdata_format
 from .exceptions import JQDataError
 
 
-# 全局客户端实例（线程局部，类似 jqdatasdk 设计）
+# 全局客户端实例
 _client: Optional[HTTPClient] = None
 
 
 def _get_client() -> HTTPClient:
+    global _client
     if _client is None:
-        raise JQDataError("未认证，请先调用 jqdata_sdk.auth()")
+        _client = HTTPClient()
     return _client
-
-
-def auth(api_key: str, base_url: str = "http://101.132.161.52:8000"):
-    """
-    认证并初始化 SDK。
-
-    用法：
-        import jqdata_sdk as jq
-        jq.auth(api_key="your-key")
-    """
-    global _client
-    _client = HTTPClient(base_url=base_url, api_key=api_key)
-    # 验证连接
-    _client.get("/health")
-    print("auth success")
-
-
-def logout():
-    """退出（清空客户端实例）"""
-    global _client
-    _client = None
-    print("已退出")
-
-
-def is_auth() -> bool:
-    """是否已认证"""
-    return _client is not None
 
 
 def get_price(
@@ -68,21 +42,14 @@ def get_price(
     """
     client = _get_client()
     fields_str = normalize_fields(fields)
-
     codes = [code] if isinstance(code, str) else list(code)
 
     if len(codes) == 1:
-        # 单只股票 —— 走 GET /v1/daily/{code}
-        params = {
-            "start": start_date,
-            "end": end_date,
-            "fq": fq,
-        }
+        params = {"start": start_date, "end": end_date, "fq": fq}
         if fields_str:
             params["fields"] = fields_str
         result = client.get(f"/v1/daily/{codes[0]}", params=params)
         rows = result.get("data", [])
-        # 构造列名
         cols = (fields or "trade_date,open,high,low,close,volume,amount").split(",")
         cols = [c.strip() for c in cols]
         df = rows_to_dataframe(rows, cols)
@@ -90,7 +57,6 @@ def get_price(
             df = df.set_index("trade_date")
         return df
     else:
-        # 多只股票 —— 走 POST /v1/daily/batch
         payload = {
             "codes": codes,
             "start": start_date,
@@ -112,15 +78,7 @@ def get_all_securities(
     types: Optional[List[str]] = None,
     date: Optional[str] = None,
 ) -> pd.DataFrame:
-    """
-    获取标的信息（模仿 jqdatasdk.get_all_securities）
-
-    参数：
-        types: ['stock'] / ['etf'] / ['index'] / ['stock','etf']
-        date: 暂不使用（保留参数兼容性）
-
-    返回：DataFrame，列: code, display_name, name, type, exchange, start_date, end_date
-    """
+    """获取标的信息（模仿 jqdatasdk.get_all_securities）"""
     client = _get_client()
     params = {}
     if types:
@@ -129,7 +87,6 @@ def get_all_securities(
     rows = result.get("data", [])
     cols = ["code", "display_name", "name", "type", "exchange", "start_date", "end_date"]
     df = rows_to_dataframe(rows, cols, index_col=None)
-    # 日期列转换
     for col in ["start_date", "end_date"]:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="coerce")
@@ -137,11 +94,7 @@ def get_all_securities(
 
 
 def get_trade_days(start_date: str, end_date: str) -> pd.DatetimeIndex:
-    """
-    获取交易日列表（模仿 jqdatasdk.get_trade_days）
-
-    返回：pd.DatetimeIndex
-    """
+    """获取交易日列表（模仿 jqdatasdk.get_trade_days）"""
     client = _get_client()
     result = client.get("/v1/trade_days", params={"start": start_date, "end": end_date})
     dates = result.get("trade_days", [])
@@ -149,11 +102,7 @@ def get_trade_days(start_date: str, end_date: str) -> pd.DatetimeIndex:
 
 
 def get_index_stocks(code: str, date: Optional[str] = None) -> List[str]:
-    """
-    获取指数成分股（模仿 jqdatasdk.get_index_stocks）
-
-    ⚠️ 当前依赖 index_weights 表，若未同步返回空列表 + 提示
-    """
+    """获取指数成分股（模仿 jqdatasdk.get_index_stocks）"""
     client = _get_client()
     params = {}
     if date:
@@ -166,10 +115,6 @@ def get_index_stocks(code: str, date: Optional[str] = None) -> List[str]:
 
 
 def get_query_count() -> dict:
-    """
-    查询当日额度（模仿 jqdatasdk.get_query_count）
-
-    返回: {'total': 10000000, 'used': 12345, 'spare': 9987655}
-    """
+    """查询当日调用统计"""
     client = _get_client()
     return client.get("/v1/query_count")

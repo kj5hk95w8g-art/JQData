@@ -44,6 +44,7 @@ services:
       - CH_DB=jqdata
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - SIGNATURE_SALT=yuntu-jqdata-2026-internal-only
     depends_on:
       clickhouse: {condition: service_healthy}
       redis: {condition: service_healthy}
