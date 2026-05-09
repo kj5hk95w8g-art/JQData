@@ -204,6 +204,66 @@ scrape_configs:
 | `/data/jqdata-platform` | 项目代码/脚本 | ~704KB |
 | `/data/monitoring/alerts` | 健康检查告警日志 | ~动态增长 |
 
+### 2.6 系统配置
+
+| 配置项 | 值 | 说明 |
+|--------|----|------|
+| 时区 | `Asia/Shanghai` (CST, +0800) | 与北京时间一致 |
+| Swap | `0B` | 未配置swap，依赖物理内存 |
+| Docker版本 | `latest (Ubuntu 24.04仓库)` | — |
+| 内核 | `Linux 6.x` | — |
+
+> 64GB物理内存充足，当前无swap不影响运行。后续若OOM可考虑添加swap或调整容器内存限制。
+
+### 2.7 Docker Daemon 配置
+
+文件路径：`/etc/docker/daemon.json`
+
+```json
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "100m",
+    "max-file": "3"
+  },
+  "registry-mirrors": ["https://docker.mirrors.sjtug.sjtu.edu.cn"]
+}
+```
+
+> 注意：daemon.json 配置对新创建的容器生效。当前各服务已通过 compose 的 `logging` 配置限制日志，全局 daemon 配置供未来初始化参考。
+
+### 2.8 环境变量模板
+
+文件路径：`deploy/.env.example`
+
+```bash
+# ClickHouse
+CH_CONTAINER_NAME=jqdata-clickhouse
+CH_HOST_PORT=8123
+CH_TCP_PORT=9000
+CH_DATA_DIR=/data/clickhouse
+
+# Redis
+REDIS_CONTAINER_NAME=jqdata-redis
+REDIS_HOST_PORT=6379
+REDIS_DATA_DIR=/data/redis
+REDIS_MAXMEM=4gb
+
+# API
+API_CONTAINER_NAME=jqdata-api
+API_HOST_PORT=8000
+API_IMAGE=jqdata-platform:latest
+CODE_DIR=/data/jqdata-platform
+
+# Grafana
+GRAFANA_CONTAINER_NAME=jqdata-grafana
+GRAFANA_HOST_PORT=3000
+GRAFANA_DATA_DIR=/data/grafana
+GRAFANA_ADMIN_PASS=admin123
+```
+
+> 当前 compose 文件已硬编码上述值，`.env.example` 供本地开发参考。生产环境如需走环境变量注入，需修改 compose 使用 `${VAR}` 语法。
+
 ### 2.6 定时任务
 
 ```bash
@@ -313,6 +373,17 @@ networks:
 | `/data/grafana` | Grafana SQLite 数据库、插件、配置 | `472:472`（Grafana容器用户） |
 
 > 容器内用户UID 472映射到宿主机，需确保宿主机 `/data/grafana` 目录权限正确。
+> 首次启动前需执行：`chown -R 472:472 /data/grafana`
+
+当前 `/data/grafana` 内容：
+
+```
+/data/grafana/
+├── grafana.db          # SQLite 主数据库（配置、用户、Dashboard元数据）
+├── csv/                # CSV导出目录
+├── plugins/            # 已安装插件（如有）
+└── png/                # 渲染图片缓存（如有）
+```
 
 ### 3.5 环境变量说明
 
@@ -337,7 +408,22 @@ networks:
 
 ---
 
-## 四、安全组规则
+## 四、数据同步状态（REQ-003）
+
+| 数据表 | 状态 | 已同步行数 | 备注 |
+|--------|------|-----------|------|
+| `index_daily` | ✅ 完成 | 23,025 | 近5年(2020-2026) |
+| `stock_daily_pre` | ⚠️ 进行中 | 2,763,000 | 已完成9/27批，还差18批 |
+| `stock_daily_post` | ❌ 未开始 | 0 | 待pre完成后开始 |
+
+**同步工具**：`src/sync_daily.py`（D服务器容器内运行）  
+**账号**：JQData 正式版，日额度 1000万条  
+**策略**：分批次同步，每批约30万条，避免单日额度耗尽  
+**日志**：`/data/jqdata-platform/sync_*.log`
+
+---
+
+## 五、安全组规则
 
 ### 4.1 D 服务器 (101.132.161.52)
 
@@ -365,7 +451,7 @@ networks:
 
 ---
 
-## 五、网络拓扑
+## 六、网络拓扑
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -407,7 +493,7 @@ networks:
 
 ---
 
-## 六、变更记录
+## 七、变更记录
 
 | 日期 | 变更内容 | 操作人 |
 |------|---------|--------|
@@ -421,7 +507,7 @@ networks:
 
 ---
 
-## 七、回滚参考
+## 八、回滚参考
 
 ### 回滚 Grafana 配置
 
