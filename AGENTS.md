@@ -98,6 +98,7 @@
 ## 五、文档管理
 
 - 命名：kebab-case（例外：`README.md`, `CHANGELOG.md`, `AGENTS.md`, `TODO.md`）
+- **非必要不新建文档，优先在原有文档上更新**
 - 谁修改谁更新，废弃文件移到 `docs/archive/`
 - 设计文档是执行契约，代码修改必须同步文档
 - 表结构变更必须同步 `docs/03-database-schema.md`
@@ -175,7 +176,7 @@
 | 技术架构 | `docs/02-architecture.md` |
 | 表结构设计 | `docs/03-database-schema.md` |
 | API接口规范 | `docs/04-api-spec.md` |
-| 部署手册 | `docs/05-deployment.md` |
+| 部署手册 | `docs/06-container-ops.md` |
 | 需求池 | `docs/TODO.md` |
 | 变更日志 | `CHANGELOG.md` |
 
