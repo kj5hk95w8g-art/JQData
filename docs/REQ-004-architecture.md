@@ -1,6 +1,7 @@
-# REQ-004 技术架构设计
+# REQ-004 技术架构设计（简化版）
 
-> 目标：请求签名认证 + 无感知SDK + 单IP限流
+> 目标：请求签名认证 + 无感知SDK + Nginx IP限流
+> 原则：够用即可，不过度设计
 
 ---
 
@@ -11,258 +12,230 @@
 │                      团队成员电脑                             │
 │  ┌───────────────────────────────────────────────────────┐  │
 │  │  Python SDK (jqdata_sdk)                              │  │
-│  │  ├── 内置 base_url (当前内网IP / 后期公网IP)           │  │
+│  │  ├── 内置 base_url                                    │  │
 │  │  ├── 内置 SECRET_SALT (硬编码)                        │  │
-│  │  ├── HTTPClient (发请求)                              │  │
+│  │  ├── HTTPClient                                       │  │
 │  │  │   └── 每次请求自动附加签名头                        │  │
-│  │  │       X-Timestamp: 当前时间戳                       │  │
 │  │  │       X-Signature: md5(SALT + timestamp)            │  │
-│  │  └── api.py (业务接口: get_price等)                   │  │
+│  │  └── api.py (get_price等)                             │  │
 │  └───────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
                               │
-                              │ HTTPS/HTTP
+                              │ HTTP
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Nginx（反向代理 + 限流）                    │
+│  ├── limit_req: 单IP 100条/秒                               │
+│  └── proxy_pass → FastAPI                                   │
+└─────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                    D 服务器 (Nginx 可选)                      │
+│                    FastAPI (jqdata-api)                     │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │  FastAPI (jqdata-api 容器)                            │  │
-│  │  ┌─────────────────────────────────────────────────┐  │  │
-│  │  │  中间件栈 (处理顺序从上到下)                      │  │  │
-│  │  │  1. CORS 中间件 (如果需要)                        │  │  │
-│  │  │  2. 签名验证中间件 ← 新增                        │  │  │
-│  │  │     ├── 跳过 /health (Docker healthcheck)         │  │  │
-│  │  │     ├── 读取 X-Timestamp + X-Signature            │  │  │
-│  │  │     ├── 检查时间窗口 (±5分钟)                     │  │  │
-│  │  │     ├── 计算 expected = md5(SALT + timestamp)     │  │  │
-│  │  │     ├── 比对 signature == expected                │  │  │
-│  │  │     └── 失败返回 401                              │  │  │
-│  │  │  3. IP限流中间件 ← 新增                          │  │  │
-│  │  │     ├── 基于 Redis 计数器 (sliding window)        │  │  │
-│  │  │     ├── 单IP 100条/秒                             │  │  │
-│  │  │     └── 超限返回 429                              │  │  │
-│  │  └─────────────────────────────────────────────────┘  │  │
-│  │                          │                            │  │
-│  │                          ▼                            │  │
-│  │  ┌─────────────────────────────────────────────────┐  │  │
-│  │  │  路由层 (已有 + 新增)                            │  │  │
-│  │  │  ├── GET  /health           (放行，无签名)        │  │  │
-│  │  │  ├── GET  /v1/daily/{code}  (需签名)             │  │  │
-│  │  │  ├── POST /v1/daily/batch   (需签名)             │  │  │
-│  │  │  ├── GET  /v1/index/{code}  (需签名)             │  │  │
-│  │  │  ├── GET  /v1/securities    (需签名)             │  │  │
-│  │  │  ├── GET  /v1/trade_days    (需签名)             │  │  │
-│  │  │  └── GET  /v1/query_count   (需签名)             │  │  │
-│  │  └─────────────────────────────────────────────────┘  │  │
+│  │  签名验证中间件                                       │  │
+│  │  ├── 跳过 /health                                     │  │
+│  │  ├── 读取 X-Signature                                 │  │
+│  │  ├── 计算 expected = md5(SALT + timestamp)            │  │
+│  │  ├── 比对 signature == expected                       │  │
+│  │  └── 失败返回 401                                     │  │
 │  └───────────────────────────────────────────────────────┘  │
 │                              │                              │
 │                              ▼                              │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │  Redis (jqdata-redis 容器)                             │  │
-│  │  ├── IP限流计数器 (TTL 1秒)                           │  │
-│  │  └── 调用统计 (可选)                                   │  │
+│  │  路由层                                               │  │
+│  │  ├── GET  /health           (放行)                    │  │
+│  │  ├── GET  /v1/daily/{code}  (需签名)                  │  │
+│  │  ├── POST /v1/daily/batch   (需签名)                  │  │
+│  │  ├── GET  /v1/index/{code}  (需签名)                  │  │
+│  │  ├── GET  /v1/securities    (需签名)                  │  │
+│  │  ├── GET  /v1/trade_days    (需签名)                  │  │
+│  │  └── GET  /v1/query_count   (需签名)                  │  │
 │  └───────────────────────────────────────────────────────┘  │
 │                              │                              │
 │                              ▼                              │
 │  ┌───────────────────────────────────────────────────────┐  │
-│  │  ClickHouse (jqdata-clickhouse 容器)                   │  │
-│  │  └── 数据查询                                          │  │
+│  │  ClickHouse                                           │  │
 │  └───────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 二、关键模块设计
+## 二、关键设计决策
 
-### 2.1 签名验证中间件 (FastAPI)
+### 2.1 为什么去掉时间窗口
 
-**位置：** `src/main.py` 或独立 `src/middleware/auth.py`
+| 原方案 | 简化后 | 理由 |
+|--------|--------|------|
+| 检查 `\|now - timestamp\| <= 300秒` | **不检查** | 内部团队使用，重放攻击风险极低；避免用户电脑时间不准导致报错 |
 
-**职责：**
-- 拦截所有请求（除 `/health`）
-- 验证 X-Timestamp + X-Signature
-- 时间窗口检查（±300秒）
-- 失败返回 401 Unauthorized
+**保留timestamp的原因：** 让每次请求签名不同，防止简单抓包复用。
 
-**盐值来源：** 环境变量 `SIGNATURE_SALT`
-```bash
-# docker-compose.d.yml 环境变量
-SIGNATURE_SALT=yuntu-jqdata-2026-internal-only
+### 2.2 为什么用Nginx限流而不是Redis
+
+| 方案 | 复杂度 | 改动范围 |
+|------|--------|---------|
+| Redis限流 | 需改代码 + 依赖Redis | FastAPI中间件 |
+| **Nginx限流** | **只改配置** | **Nginx配置** |
+
+Nginx原生支持，两行配置搞定，不需要碰代码。
+
+### 2.3 为什么盐值不主动更换
+
+| 原方案 | 简化后 | 理由 |
+|--------|--------|------|
+| 每年更换，多盐值并行7天 | **不更换，泄露再换** | 私有仓库泄露概率极低；减少维护工作量 |
+
+---
+
+## 三、签名验证中间件（FastAPI）
+
+```python
+import hashlib
+import os
+from fastapi import Request, HTTPException
+
+# 从环境变量读取盐值
+SALT = os.getenv("SIGNATURE_SALT", "default-salt")
+
+async def signature_middleware(request: Request, call_next):
+    # /health 放行（Docker healthcheck用）
+    if request.url.path == "/health":
+        return await call_next(request)
+    
+    # 读取签名
+    signature = request.headers.get("X-Signature", "")
+    timestamp = request.headers.get("X-Timestamp", "")
+    
+    if not signature or not timestamp:
+        return JSONResponse({"detail": "Missing signature"}, 401)
+    
+    # 计算期望签名（只比对，不检查时间窗口）
+    expected = hashlib.md5(f"{SALT}{timestamp}".encode()).hexdigest()
+    
+    if signature != expected:
+        return JSONResponse({"detail": "Invalid signature"}, 401)
+    
+    return await call_next(request)
 ```
 
-**支持多盐值并行（平滑升级）：**
-```bash
-# 新旧盐值同时支持（逗号分隔）
-SIGNATURE_SALT=yuntu-jqdata-2026-internal-only,yuntu-jqdata-2027-v2-new
-```
+**代码量：约15行**
 
-### 2.2 IP限流中间件 (FastAPI)
+---
 
-**位置：** `src/main.py` 或独立 `src/middleware/rate_limit.py`
-
-**实现：** Redis + Sliding Window
-```
-Key: rate_limit:{client_ip}:{timestamp//1}
-Value: 计数器
-TTL: 2秒
-```
-
-**规则：**
-- 单IP 1秒内不超过 100 次请求
-- 超限返回 429 Too Many Requests
-- 响应头附带 `X-RateLimit-Remaining` 和 `X-RateLimit-Reset`
-
-### 2.3 SDK签名模块
-
-**位置：** `src/sdk/jqdata_sdk/client.py` (改造)
-
-**职责：**
-- 每次 HTTP 请求前自动计算签名
-- 附加到请求头中
+## 四、SDK签名模块
 
 ```python
 import hashlib
 import time
 
-SECRET_SALT = "yuntu-jqdata-2026-internal-only"
-BASE_URL = "http://172.24.52.237:8000"  # 后期换公网IP
+SALT = "yuntu-jqdata-2026-internal-only"
+BASE_URL = "http://172.24.52.237:8000"
 
 def _sign_headers():
     timestamp = str(int(time.time()))
-    signature = hashlib.md5(f"{SECRET_SALT}{timestamp}".encode()).hexdigest()
+    signature = hashlib.md5(f"{SALT}{timestamp}".encode()).hexdigest()
     return {
         "X-Timestamp": timestamp,
         "X-Signature": signature,
     }
+
+# 每次请求自动附加
+headers = {"Content-Type": "application/json"}
+headers.update(_sign_headers())
 ```
+
+**代码量：约10行**
 
 ---
 
-## 三、数据流
+## 五、Nginx限流配置
+
+```nginx
+# http块中定义限流区域
+limit_req_zone $binary_remote_addr zone=jqdata_api:10m rate=100r/s;
+
+server {
+    listen 80;
+    
+    location /jqdata/ {
+        # 限流：100条/秒，突发200条
+        limit_req zone=jqdata_api burst=200 nodelay;
+        
+        # 转发到FastAPI
+        proxy_pass http://172.24.52.237:8000/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+**配置量：约8行**
+
+---
+
+## 六、数据流
 
 ### 正常请求
 ```
-用户调用 get_price()
-    → SDK 计算签名 (timestamp + md5)
-    → HTTP GET /v1/daily/000001.XSHE
-       Headers: X-Timestamp=1234567890, X-Signature=abc123...
-    → FastAPI 中间件
-       → 读取 Headers
-       → 检查时间窗口 (|now - timestamp| <= 300)
-       → 计算 expected = md5(SALT + timestamp)
-       → 比对 signature == expected ✅
-       → 检查 IP 限流 (Redis 计数)
-       → 限流通过 ✅
-    → 路由处理
-       → 查 ClickHouse
-       → 返回 JSON
-    → SDK 解析 JSON → DataFrame
+SDK → 计算签名 → HTTP请求 → Nginx限流通过 → FastAPI验签通过 → 查数据 → 返回
 ```
 
 ### 异常请求
 ```
-无签名请求
-    → 中间件检测 X-Signature 缺失
-    → 返回 401 {"detail": "Missing signature"}
-
-过期请求 (timestamp > 5分钟前)
-    → 中间件检测时间窗口
-    → 返回 401 {"detail": "Request expired"}
-
-错误签名
-    → 中间件计算 expected != signature
-    → 返回 401 {"detail": "Invalid signature"}
-
-IP限流
-    → 中间件检查 Redis 计数 > 100
-    → 返回 429 {"detail": "Rate limit exceeded"}
+无签名          → FastAPI返回 401
+错误签名        → FastAPI返回 401
+单IP超100条/秒 → Nginx返回 429
 ```
 
 ---
 
-## 四、配置管理
+## 七、配置管理
 
-### 服务器端 (docker-compose.d.yml)
-
-```yaml
-services:
-  api:
-    environment:
-      # 签名盐值（支持多盐值并行，逗号分隔）
-      SIGNATURE_SALT: "yuntu-jqdata-2026-internal-only"
-      
-      # 时间窗口（秒）
-      SIGNATURE_TIME_WINDOW: "300"
-      
-      # IP限流：每秒最大请求数
-      RATE_LIMIT_PER_SECOND: "100"
-```
-
-### SDK端 (硬编码)
-
-```python
-# src/sdk/jqdata_sdk/client.py
-
-# 当前版本盐值
-SECRET_SALT = "yuntu-jqdata-2026-internal-only"
-
-# 服务器地址（后期公网IP绑定后更新）
-DEFAULT_BASE_URL = "http://172.24.52.237:8000"
-```
+| 位置 | 配置项 | 说明 |
+|------|--------|------|
+| `docker-compose.d.yml` | `SIGNATURE_SALT` | 服务器盐值 |
+| SDK硬编码 | `SECRET_SALT` | 客户端盐值（与服务器一致）|
+| SDK硬编码 | `BASE_URL` | 服务器地址 |
+| Nginx配置 | `limit_req` | 单IP 100条/秒 |
 
 ---
 
-## 五、盐值更换流程
+## 八、总代码/配置量
 
-```
-Day 0: 发现盐值泄露（或到期）
-    │
-    ├── 1. 生成新盐值：yuntu-jqdata-2027-v2-new
-    │
-    ├── 2. 服务器端更新
-    │      SIGNATURE_SALT="旧盐值,新盐值"（并行支持）
-    │      docker compose restart api
-    │
-    ├── 3. 更新SDK代码
-    │      SECRET_SALT = "yuntu-jqdata-2027-v2-new"
-    │      git commit → git push
-    │
-    ├── 4. 通知团队成员升级
-    │      pip install --upgrade git+ssh://...
-    │
-    ├── 5. 并行期（7天）
-    │      旧版SDK → 旧盐值 → 服务器认 ✅
-    │      新版SDK → 新盐值 → 服务器认 ✅
-    │
-    └── 6. Day 7: 禁用旧盐值
-           SIGNATURE_SALT="新盐值"（只剩一个）
-           docker compose restart api
-           旧版SDK请求 → 401（提示升级）
-```
+| 模块 | 代码/配置量 |
+|------|-----------|
+| FastAPI签名中间件 | ~15行 |
+| SDK签名函数 | ~10行 |
+| Nginx限流配置 | ~8行 |
+| **合计** | **~33行** |
 
 ---
 
-## 六、代码变更清单
+## 九、盐值泄露应对（被动）
 
-| 文件 | 变更 | 说明 |
+```
+发现泄露（或怀疑泄露）
+    │
+    ├── 1. 改服务器环境变量 SIGNATURE_SALT（新盐值）
+    ├── 2. 改SDK代码 SECRET_SALT（新盐值）
+    ├── 3. git commit → git push
+    ├── 4. 通知团队：pip install --upgrade
+    └── 5. 服务器重启（加载新盐值）
+
+旧版SDK用户 → 401错误 → 升级后恢复
+```
+
+**不需要多盐值并行，直接切换。**
+
+---
+
+## 十、变更清单
+
+| 文件 | 操作 | 说明 |
 |------|------|------|
-| `src/main.py` | 修改 | 添加签名验证中间件、IP限流中间件 |
-| `src/middleware/auth.py` | 新增 | 签名验证逻辑（可选拆分） |
-| `src/middleware/rate_limit.py` | 新增 | IP限流逻辑（可选拆分） |
-| `src/sdk/jqdata_sdk/client.py` | 修改 | 每次请求自动附加签名头 |
+| `src/main.py` | 修改 | 添加签名验证中间件（~15行）|
+| `src/sdk/jqdata_sdk/client.py` | 修改 | 添加签名头（~10行）|
+| Nginx配置 | 新增 | limit_req限流（~8行）|
 | `docker-compose.d.yml` | 修改 | 添加 SIGNATURE_SALT 环境变量 |
-| `docs/REQ-004-architecture.md` | 新增 | 本文档 |
-
----
-
-## 七、性能考量
-
-| 指标 | 目标 | 说明 |
-|------|------|------|
-| 签名计算 | < 1ms | md5计算极快，不影响响应 |
-| 时间窗口检查 | < 1ms | 简单整数比较 |
-| IP限流（Redis） | < 5ms | Redis incr + ttl |
-| 总体中间件开销 | < 10ms | 可忽略 |
-| P95 响应时间 | < 200ms | 含中间件 + ClickHouse查询 |
