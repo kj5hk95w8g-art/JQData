@@ -560,6 +560,20 @@ python3 src/sync_daily.py --full --fq post    # 开始 post
 
 配置位置：`deploy` 用户的 crontab
 
+---
+
+## deploy.sh 部署行为
+
+D 服务器部署时，deploy.sh 会自动：
+1. `git checkout` 到指定 tag
+2. `docker compose up -d` 启动/更新容器
+3. **热重载 Prometheus 配置**（如果 jqdata-prometheus 容器在运行）
+   - 调用 `POST/-/reload` 热重载
+   - 等待 3 秒后校验容器内配置 md5 是否与宿主机一致
+   - 不一致则自动 `docker restart jqdata-prometheus`
+4. 健康检查（API / ClickHouse / Redis）
+5. 失败自动回滚到上一个 tag
+
 ### 2.7 Dockerfile (API 镜像)
 
 ```dockerfile
