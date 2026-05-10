@@ -76,7 +76,21 @@ if [ -n "$COMPOSE_D" ]; then
     if docker ps --format '{{.Names}}' | grep -q "^jqdata-prometheus$"; then
         info "热重载 Prometheus 配置..."
         if curl -sf -X POST http://localhost:9090/-/reload > /dev/null 2>&1; then
-            success "Prometheus 配置已热重载"
+            # 等待 3 秒让 bind mount 刷新
+            sleep 3
+            # 验证容器内配置是否与宿主机一致
+            if [ -f "monitoring/prometheus.yml" ]; then
+                HOST_HASH=$(md5sum monitoring/prometheus.yml 2>/dev/null | awk '{print $1}')
+                CONTAINER_HASH=$(docker exec jqdata-prometheus md5sum /etc/prometheus/prometheus.yml 2>/dev/null | awk '{print $1}')
+                if [ "$HOST_HASH" = "$CONTAINER_HASH" ] && [ -n "$HOST_HASH" ]; then
+                    success "Prometheus 配置已热重载"
+                else
+                    warn "热重载后配置未同步，重启 Prometheus 容器..."
+                    docker restart jqdata-prometheus && success "Prometheus 已重启" || warn "Prometheus 重启失败，请手动检查"
+                fi
+            else
+                success "Prometheus 配置已热重载"
+            fi
         else
             warn "Prometheus 热重载失败，尝试重启容器..."
             docker restart jqdata-prometheus && success "Prometheus 已重启" || warn "Prometheus 重启失败，请手动检查"
