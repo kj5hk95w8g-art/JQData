@@ -27,13 +27,13 @@ scrape_configs:
     static_configs:
       - targets: ['node-exporter:9100']
         labels:
-          instance: 'server-d'
+          instance: 'server D'
     metrics_path: /metrics
 
   - job_name: 'node-exporter-a'
     static_configs:
       - targets: ['172.24.52.238:9100']
         labels:
-          instance: 'server-a'
+          instance: 'server A'
           role: 'application'
     metrics_path: /metrics
