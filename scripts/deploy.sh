@@ -71,6 +71,17 @@ if [ -n "$COMPOSE_D" ]; then
         info "部署监控栈..."
         docker compose -f monitoring/docker-compose.monitoring.yml up -d
     fi
+
+    # Prometheus 配置热重载（如果容器在运行）
+    if docker ps --format '{{.Names}}' | grep -q "^jqdata-prometheus$"; then
+        info "热重载 Prometheus 配置..."
+        if curl -sf -X POST http://localhost:9090/-/reload > /dev/null 2>&1; then
+            success "Prometheus 配置已热重载"
+        else
+            warn "Prometheus 热重载失败，尝试重启容器..."
+            docker restart jqdata-prometheus && success "Prometheus 已重启" || warn "Prometheus 重启失败，请手动检查"
+        fi
+    fi
     
     # 健康检查
     info "健康检查（等待10秒）..."
