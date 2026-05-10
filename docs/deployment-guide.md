@@ -527,12 +527,38 @@ GRAFANA_ADMIN_PASS=admin123
 
 ### 2.6 定时任务
 
+#### 健康检查（每分钟）
+
 ```bash
-# 每分钟执行健康检查
 * * * * * /data/jqdata-platform/scripts/health-check-alert.sh >> /data/monitoring/alerts/alerts.log 2>&1
 ```
 
-配置位置：`root` 用户的 crontab
+#### 数据每日同步（交易日 23:00）
+
+```bash
+# 交易日（周一到周五）23:00 执行每日同步
+0 23 * * 1-5 /data/jqdata-platform/scripts/sync-incremental.sh
+```
+
+**策略：先增量，后全量**
+1. **阶段1（增量）**：同步当天收盘数据，优先级高，额度消耗极小（约 1 万条/天）
+2. **阶段2（全量补全）**：检查剩余额度，如有余量则继续全量补全（pre -> post）
+
+**配置要求：**
+1. crontab 所在用户需要设置环境变量 `JQ_USER` 和 `JQ_PASS`
+2. 日志目录 `$PROJECT_DIR/logs` 自动创建
+3. 日限额通过 `.env` 中 `DAILY_QUOTA_LIMIT` 控制，默认 550 万条
+
+**手动全量同步（historical backfill）**：
+```bash
+ssh jqdata-d
+cd /data/jqdata-platform
+source .env
+python3 src/sync_daily.py --resume --fq pre   # 继续 pre
+python3 src/sync_daily.py --full --fq post    # 开始 post
+```
+
+配置位置：`deploy` 用户的 crontab
 
 ### 2.7 Dockerfile (API 镜像)
 

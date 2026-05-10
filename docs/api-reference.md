@@ -2,18 +2,23 @@
 
 ## 认证
 
-所有接口（除 `/health` 外）需在 Header 中携带 API Key：
+所有接口（除 `/health` 和 `/nginx-health` 外）需在 Header 中携带请求签名：
 
 ```
-X-API-Key: your-api-key
+X-Timestamp: 1715241600
+X-Signature: a1b2c3d4e5f6...
 ```
+
+**签名计算：** `signature = md5(SALT + timestamp)`，其中 SALT 为服务器与 SDK 约定的盐值。
+
+> 不需要手动计算签名，使用 Python SDK 会自动附加。
 
 ---
 
 ## 端点列表
 
 ### GET /health
-健康检查，无需认证。
+健康检查，无需认证。返回 ClickHouse 和 Redis 连接状态。
 
 **响应：**
 ```json
@@ -106,14 +111,12 @@ X-API-Key: your-api-key
 ---
 
 ### GET /v1/query_count
-查询当日额度使用情况。
+查询当日调用统计（内部使用，当前无额度限制）。
 
 **响应：**
 ```json
 {
-  "total": 10000000,
-  "used": 12345,
-  "spare": 9987655
+  "note": "内部系统，暂无额度限制"
 }
 ```
 
@@ -121,10 +124,14 @@ X-API-Key: your-api-key
 
 ## SDK 用法
 
+**安装：**
+```bash
+pip install git+ssh://git@github.com:kj5hk95w8g-art/JQData.git#subdirectory=src/sdk
+```
+
+**使用（完全无感知，无需 auth）：**
 ```python
 import jqdata_sdk as jq
-
-jq.auth(api_key="your-key")
 
 # 单股票
 df = jq.get_price("000001.XSHE", start_date="2020-01-01", end_date="2026-05-08")
@@ -137,7 +144,9 @@ securities = jq.get_all_securities(types=["stock"])
 
 # 交易日历
 days = jq.get_trade_days("2025-01-01", "2025-12-31")
+```
 
-# 额度
-print(jq.get_query_count())
+**升级：**
+```bash
+pip install --upgrade git+ssh://git@github.com:kj5hk95w8g-art/JQData.git#subdirectory=src/sdk
 ```

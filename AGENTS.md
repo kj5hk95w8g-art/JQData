@@ -2,10 +2,7 @@
 
 > 本文档是 AI 助手的**强制性操作约束手册**。违反任何红线规则 → 立即停止操作。
 >
-> 详细技术方案 → [`docs/02-architecture.md`](./docs/02-architecture.md)
-> 表结构设计 → [`docs/03-database-schema.md`](./docs/03-database-schema.md)
-> API 接口规范 → [`docs/04-api-spec.md`](./docs/04-api-spec.md)
-> 部署手册 → [`docs/05-deployment.md`](./docs/05-deployment.md)
+> 完整文档导航 → [`README.md`](./README.md)
 
 ---
 
@@ -15,44 +12,62 @@
 |------|------|
 | ❌ 修改生产数据库表结构 | 需用户明确"同意"，且必须先备份 |
 | ❌ 在服务器上手动创建表/导入数据/配置定时任务 | 必须代码化，通过部署脚本执行 |
-| ❌ 擅自重启 ClickHouse / Redis 生产实例 | 需用户明确"同意"，必须先确认无活跃查询 |
+| ❌ 擅自重启 ClickHouse / Redis 生产实例 | 需用户明确"同意"，先确认无活跃查询 |
 | ❌ 直接操作 JQData 账号做测试 | 测试必须用本地数据集，禁止浪费正式账号流量 |
 | ❌ 在服务器上明文存储密码/token | 必须走环境变量或密钥管理服务 |
 | ❌ 将行情数据导出到公网/外发 | 金融数据仅限内网使用 |
 | ❌ 直接 push 到 main | 必须走 feature → develop → 测试 → PR → main |
 | ❌ 测试未通过就部署到 C/D 生产服务器 | 必须先在本地或测试环境验证 |
-| ❌ root 登录服务器操作 | 日常运维使用普通用户 + sudo |
-| ❌ 修改服务器上的 `.env` 文件 | 只提供建议，用户执行或走配置中心 |
+| ❌ root 登录服务器操作 | 使用 deploy 用户 + 免密 sudo docker |
+| ❌ 修改服务器上的 `.env` 文件 | 只提供建议，用户执行或走配置注入 |
 | ❌ 使用 `--no-verify` / `--no-edit` | 遇到检查失败须报告用户 |
 | ❌ 未经同意修改防火墙/安全组规则 | 包括 iptables、阿里云安全组等 |
 | ❌ 边排查边修改生产数据 | 排查阶段只读。定位根因 → 报告 → 获同意 → 执行 → 验证 |
 | ❌ 日志/打印输出敏感信息 | JQData账号、密码、数据库连接串等必须先脱敏 |
-| ❌ 在全市场范围执行无限制查询 | 查询必须带时间范围和标的限制，避免拖垮数据库 |
+| ❌ 在全市场范围执行无限制查询 | 查询必须带时间范围和标的限制 |
+| ❌ 认为 push tag = 自动部署 | tag 推送后不会自动部署，必须手动 SSH 执行 deploy.sh |
+| ❌ AI 擅自执行 release.sh | 发版前必须逐项汇报，获用户"同意发版"后方可执行 |
 
 ---
 
-## 二、服务器定义（ABCD标准命名）
+## 二、环境信息
 
-以后所有操作统一使用 **A/B/C/D** 简称指代，禁止混用IP和名称。
+### 2.1 服务器定义（ABCD 标准命名）
 
-| 代号 | 角色 | 公网IP | 内网IP | 配置 | 到期 | 部署内容 | 操作约束 |
-|------|------|--------|--------|------|------|---------|---------|
-| **A** | 应用服务器 | `106.14.141.212` | `172.24.52.238` | 4核 16GB 5Mbps ecs.g7.xlarge | 2027-08-12 | **❌ 不动现有业务**（资产沃土/云图中心在此运行） | 禁止部署任何新组件 |
-| **B** | 测试服务器 | `139.196.34.92` | `172.24.52.236` | 4核 16GB 1Mbps ecs.g7.xlarge | 2027-08-10 | **❌ 禁止修改** 保留现有测试环境 | 禁止修改 |
-| **C** | 副本/可视化 | `139.196.186.67` | `172.24.52.235` | 4核 32GB 1Mbps ecs.r7.xlarge | 2027-08-16 | Grafana + ClickHouse从节点（待建）+ Airflow调度（待建） | 标准化部署，走脚本 |
-| **D** | 核心数据层 | `101.132.161.52` | `172.24.52.237` | 8核 64GB 1Mbps ecs.hfr7.2xlarge | 2027-08-07 | ClickHouse主 + Redis + FastAPI + 数据同步 | 标准化部署，走脚本 |
+| 代号 | 角色 | 公网IP | 配置 | 部署内容 | 约束 |
+|------|------|--------|------|---------|------|
+| **A** | 应用服务器 | `106.14.141.212` | 4核 16GB | **❌ 不动**（资产沃土/云图中心） | 禁止部署任何新组件 |
+| **B** | 测试服务器 | `139.196.34.92` | 4核 16GB | **❌ 不动**（现有测试环境） | 禁止修改 |
+| **C** | 可视化/调度 | `139.196.186.67` | 4核 32GB | Grafana + Airflow（待建） | docker-compose，deploy 用户 |
+| **D** | 核心数据层 | `101.132.161.52` | 8核 64GB | ClickHouse + Redis + FastAPI + Nginx | docker-compose，deploy 用户 |
 
-**网络：** 四台机器同属阿里云 VPC `172.24.52.0/24`，内网互通。C/D数据服务端口仅开放内网访问。
+**网络：** 阿里云 VPC `172.24.52.0/24`，内网互通。C/D 数据服务端口仅开放内网访问。
 
-**账号：**
-- A/B: 使用现有运维账号（不动）
-- C/D: `root` / `Yuntu@2026`（当前），后续创建 `jqdata` 运维用户
+**SSH 配置：**
+```
+Host jqdata-c
+    HostName 139.196.186.67
+    User deploy
+Host jqdata-d
+    HostName 101.132.161.52
+    User deploy
+```
 
-**磁盘规划：**
-- A/B/C: 200GB系统盘（当前够用）
-- D: 200GB系统盘 + **待加300GB数据盘**（全量5年行情约110GB+）
+**项目路径：** `/data/jqdata-platform`（C/D 服务器）
 
-**配置分离：** `docker-compose.yml` / `.env.example` 在 Git（只读）；`.env.production` 在服务器本地（❌ 禁止直接修改，走配置注入）。
+### 2.2 容器与服务
+
+| 服务 | 容器名 | 端口 | 位置 |
+|------|--------|------|------|
+| ClickHouse | `clickhouse` | 8123(HTTP) / 9000(Native) | D 服务器 |
+| Redis | `redis` | 6379 | D 服务器 |
+| FastAPI | `api` | 8000（仅容器内，宿主机不映射） | D 服务器 |
+| Nginx | `nginx` | 18080（公网暴露） | D 服务器 |
+| Prometheus | `prometheus` | 9090 | D 服务器 |
+| node-exporter | `node-exporter` | 9100 | D 服务器 |
+| Grafana | `grafana` | 3000 | C 服务器 |
+
+**配置分离：** `docker-compose.*.yml` / `.env.example` 在 Git（只读）；`.env.production` 在服务器本地（❌ 禁止直接修改）。
 
 ---
 
@@ -60,11 +75,11 @@
 
 | 分支 | 用途 | 合并目标 |
 |------|------|---------|
-| `main` | 唯一发版分支，对应生产环境 | 禁止直接 push |
-| `develop` | 开发集成，对应测试验证 | feature/fix 合并目标 |
-| `feature/xxx` | 新功能/新接口/新因子 | → `develop` |
+| `main` | 唯一发版分支 | 禁止直接 push |
+| `develop` | 开发集成 | feature/fix 合并目标 |
+| `feature/xxx` | 新功能 | → `develop` |
 | `fix/xxx` | Bug 修复 | → `develop` |
-| `hotfix/xxx` | 紧急修复（数据异常、服务中断） | 从 `main` 切出，**必须同步到 `develop`** |
+| `hotfix/xxx` | 紧急修复 | 从 `main` 切出，**必须同步到 `develop`** |
 
 **发版（本地执行）：**
 ```bash
@@ -72,20 +87,19 @@
 ```
 自动完成：版本号 bump → 更新 `version.txt` → commit → 打 tag → push
 
+> ⚠️ **发版前必须汇报**：逐项检查 Git 状态、分支、版本号，获用户"同意发版"后方可执行。
+
 **部署（SSH 登录服务器执行）：**
 ```bash
 # D 服务器
-ssh root@101.132.161.52 'cd /data/jqdata-platform && ./scripts/deploy.sh v0.1.0'
+ssh jqdata-d 'cd /data/jqdata-platform && ./scripts/deploy.sh v0.1.x'
 
 # C 服务器
-ssh root@139.196.186.67 'cd /data/jqdata-platform && ./scripts/deploy.sh v0.1.0'
+ssh jqdata-c 'cd /data/jqdata-platform && ./scripts/deploy.sh v0.1.x'
 ```
 自动完成：fetch tag → checkout → docker compose up -d → 健康检查 → 失败回滚
 
-**无 tag 紧急修复（不推荐）：**
-```bash
-ssh root@<服务器> 'cd /data/jqdata-platform && git fetch origin && git reset --hard origin/main && docker compose up -d'
-```
+> ⚠️ **部署前必须汇报**：tag 推送后不会自动部署。必须等待用户明确"同意部署"后，方可登录服务器执行。
 
 **数据变更：** 表结构变更必须写成迁移脚本（`migrations/VXXX__description.sql`），禁止手动 `ALTER TABLE`。
 
@@ -93,31 +107,32 @@ ssh root@<服务器> 'cd /data/jqdata-platform && git fetch origin && git reset 
 
 ## 四、需求管理
 
-状态流转：`待评审 → 待排期 → 已排期 → 开发中 → 待测试 → 已发布`
+状态流转：`待评审 → 已排期 → 开发中 → 待测试 → 已发布`
 
 编号：`REQ-NNN`。Commit 格式：`类型(范围): 描述` + `Closes REQ-XXX`。
 
-类型：
-- `feat` — 新功能/新接口
-- `fix` — Bug 修复
-- `data` — 数据同步/数据修复
-- `perf` — 性能优化
-- `refactor` — 重构
-- `docs` — 文档
-- `test` — 测试
-- `deploy` — 部署/运维
-- `chore` — 杂项
+| 类型 | 用途 |
+|------|------|
+| `feat` | 新功能/新接口 |
+| `fix` | Bug 修复 |
+| `data` | 数据同步/数据修复 |
+| `perf` | 性能优化 |
+| `refactor` | 重构 |
+| `docs` | 文档 |
+| `test` | 测试 |
+| `deploy` | 部署/运维 |
+| `chore` | 杂项 |
 
 ---
 
 ## 五、文档管理
 
 - 命名：kebab-case（例外：`README.md`, `CHANGELOG.md`, `AGENTS.md`, `TODO.md`）
-- **非必要不新建文档，优先在原有文档上更新**
 - 谁修改谁更新，废弃文件移到 `docs/archive/`
 - 设计文档是执行契约，代码修改必须同步文档
-- 表结构变更必须同步 `docs/03-database-schema.md`
-- API 变更必须同步 `docs/04-api-spec.md`
+- 表结构变更必须同步 `docs/database-schema.md`
+- API 变更必须同步 `docs/api-reference.md`
+- 新增文档准入：全新领域 / 现有文档超 500 行 / 说明为何不更新现有文档
 
 ---
 
@@ -132,10 +147,10 @@ ssh root@<服务器> 'cd /data/jqdata-platform && git fetch origin && git reset 
 5. **改** — 获同意后执行修复
 6. **验** — 验证修复结果，确认数据一致性
 
-> 生产环境 ClickHouse 故障排查优先查看：
-> - `docker logs clickhouse` — 服务日志
-> - `system.query_log` — 慢查询分析
-> - `system.replication_queue` — 主从复制状态
+**生产环境 ClickHouse 故障排查优先查看：**
+- `docker logs clickhouse` — 服务日志
+- `system.query_log` — 慢查询分析
+- `system.replication_queue` — 主从复制状态
 
 ---
 
@@ -149,7 +164,7 @@ ssh root@<服务器> 'cd /data/jqdata-platform && git fetch origin && git reset 
 | 跨市场查询 | 必须限制标的数量，单次最多 1000 只 |
 | 分钟线大范围查询 | 单次最多 30 天数据 |
 | `SELECT *` | 禁止，必须指定字段 |
-| `JOIN` 操作 | 优先在应用层做，避免大数据量JOIN |
+| `JOIN` 操作 | 优先在应用层做，避免大数据量 JOIN |
 
 ### 7.2 写入约束
 
@@ -162,10 +177,10 @@ ssh root@<服务器> 'cd /data/jqdata-platform && git fetch origin && git reset 
 
 ### 7.3 JQData 流量管理
 
-- 正式账号每日 2 亿条流量，但需合理规划
-- 全市场日线约 5000 条/天，分钟线约 120 万条/天
-- 历史回填必须分批次，避免单日流量耗尽
-- 同步脚本必须记录流量使用，接近 80% 时报警
+- 正式账号每日约 1000 万条额度
+- 全市场日线约 5200 条/天，分钟线约 120 万条/天
+- 历史回填必须分批次，避免单日额度耗尽
+- 同步脚本必须记录流量使用
 
 ---
 
@@ -179,7 +194,7 @@ ssh root@<服务器> 'cd /data/jqdata-platform && git fetch origin && git reset 
 | 数据质量检查 | "检查数据质量" / "有没有缺数据" | `data-quality-checker` |
 | 性能分析 | "查询好慢" / "优化一下" | `query-performance-analyzer` |
 | 部署检查 | "准备部署" / "检查部署条件" | `deploy-guard` |
-| API测试 | "测试API" / "接口通不通" | `api-smoke-test` |
+| API 测试 | "测试API" / "接口通不通" | `api-smoke-test` |
 | 因子计算 | "计算MA" / "算一下RSI" | `factor-calculator` |
 
 ---
@@ -188,14 +203,14 @@ ssh root@<服务器> 'cd /data/jqdata-platform && git fetch origin && git reset 
 
 | 内容 | 文档 |
 |------|------|
-| 技术架构 | `docs/02-architecture.md` |
-| 表结构设计 | `docs/03-database-schema.md` |
-| API接口规范 | `docs/04-api-spec.md` |
-| 部署手册 | `docs/06-container-ops.md` |
-| 需求池 | `docs/TODO.md` |
+| 完整文档导航 | `README.md` |
+| 数据库表结构 | `docs/database-schema.md` |
+| API 接口规范 | `docs/api-reference.md` |
+| 部署运维手册 | `docs/deployment-guide.md` |
+| 需求池与当前状态 | `docs/TODO.md` |
+| 开发流程 | `docs/development-workflow.md` |
+| 分发平台设计 | `docs/requirements/REQ-004.md` |
 | 变更日志 | `CHANGELOG.md` |
-
----
 
 ---
 
@@ -205,47 +220,27 @@ ssh root@<服务器> 'cd /data/jqdata-platform && git fetch origin && git reset 
 
 | 信息类型 | 脱敏前 | 脱敏后 | 脱敏方式 |
 |---------|--------|--------|---------|
-| JQData账号 | `13812345678` | `138****5678` | 中间4位隐藏 |
+| JQData 账号 | `13812345678` | `138****5678` | 中间4位隐藏 |
 | 密码/token | `any_value` | `***` | 完全不输出 |
 | 数据库连接串 | `clickhouse://user:pass@host/db` | `clickhouse://user:***@host/db` | 密码替换为 `***` |
-| 服务器IP | `101.132.161.52` | `101.***.***.52` | 中间两段隐藏 |
+| 服务器 IP | `101.132.161.52` | `101.***.***.52` | 中间两段隐藏 |
 | API Key | `ak_xxxxxxxxxxxx` | `ak_****` | 前4位+`****` |
 
 **检查清单（代码审查必检）：**
 - [ ] `print()` / `logger.info()` / `logger.debug()` 中是否包含 `password`、`token`、`secret`、`key`、`auth`？
 - [ ] 异常信息 `str(e)` 是否可能泄露数据库连接串、文件路径等敏感信息？
 - [ ] API 返回的 error message 是否包含原始异常堆栈或敏感字段？
-- [ ] JQData SDK 调用失败时，是否把完整账号密码打印到日志？
 
 ---
 
 ## 附录B：金融数据安全规范
 
-**比通用项目更严格的数据安全要求：**
-
-1. **数据不出内网**：行情数据、财务数据、因子数据仅限 VPC 内网访问
-2. **禁止截屏外发**：含股票行情、持仓数据的页面禁止截图发到外部
-3. **访问审计**：关键查询接口记录访问日志（谁、什么时候、查了什么标的）
-4. **数据保留期**：离职人员账号立即回收，历史访问日志保留 1 年
-5. **备份加密**：归档到 MinIO 的历史数据文件必须加密存储
-
----
-
-## 附录C：SDK 发布
-
-**安装：**
-```bash
-pip install git+ssh://git@github.com:kj5hk95w8g-art/JQData.git#subdirectory=src/sdk
-```
-
-**用法：**
-```python
-import jqdata_sdk as jq
-jq.auth(api_key="your-key")
-df = jq.get_price("000001.XSHE", start_date="2020-01-01", end_date="2026-05-08")
-```
+1. **数据不出内网**：行情数据仅限 VPC 内网访问
+2. **禁止截屏外发**：含股票行情的页面禁止截图发到外部
+3. **访问审计**：关键查询接口记录访问日志
+4. **备份加密**：归档的历史数据文件必须加密存储
 
 ---
 
 *最后更新：2026-05-09*  
-*版本：v2.0.0 — 增加 Python SDK、API Key 认证、批量查询端点*
+*版本：v2.1.0 — 参照沃土文档体系重构，增加部署约束、AI Skill 速查、快速参考*
