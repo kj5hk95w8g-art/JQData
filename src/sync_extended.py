@@ -42,6 +42,10 @@ def insert_df(ch: Client, table: str, df: pd.DataFrame):
     if "id" in df.columns: df = df.drop(columns=["id"])
     df = df.where(pd.notna(df), None)
     df = df.rename(columns={c: _clean_col(c) for c in df.columns})
+    # ClickHouse 不支持 pandas Timestamp，转换为字符串
+    for c in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[c]):
+            df[c] = df[c].astype(str)
     cols = [c for c in df.columns]
     # 自动推断 ORDER BY
     if "code" in cols and "day" in cols:
