@@ -43,12 +43,14 @@
 
 ### 2.2 Tick/分笔数据
 
-| 接口 | 说明 |
-|------|------|
-| `get_ticks()` | 历史 tick 数据 |
-| `get_current_tick()` | 实时 tick |
-| `get_today_tick_period()` | 当日分笔成交 |
-| `get_call_auction()` | 集合竞价数据 |
+| 接口 | 说明 | 状态 |
+|------|------|------|
+| `get_ticks()` | 历史 tick 数据 | ❌ 需机构版额外开通 |
+| `get_current_tick()` | 实时 tick | ❌ 需机构版额外开通 |
+| `get_today_tick_period()` | 当日分笔成交 | ❌ 需机构版额外开通 |
+| `get_call_auction()` | 集合竞价数据 | ✅ 可用 |
+
+> **注意：** tick 级数据（逐笔成交、买卖五档快照）不在当前 License 3 权限范围内，需申请机构版或单独开通。
 
 ### 2.3 附加信息
 
