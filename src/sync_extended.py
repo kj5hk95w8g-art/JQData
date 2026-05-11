@@ -43,6 +43,20 @@ def insert_df(ch: Client, table: str, df: pd.DataFrame):
     df = df.where(pd.notna(df), None)
     df = df.rename(columns={c: _clean_col(c) for c in df.columns})
     cols = [c for c in df.columns]
+    # 自动推断 ORDER BY
+    if "code" in cols and "day" in cols:
+        order_by = "(code, day)"
+    elif "code" in cols and "date" in cols:
+        order_by = "(code, date)"
+    elif "sec_code" in cols and "date" in cols:
+        order_by = "(sec_code, date)"
+    elif "industry_code" in cols and "stock_code" in cols:
+        order_by = "(industry_code, stock_code)"
+    elif "concept_code" in cols and "stock_code" in cols:
+        order_by = "(concept_code, stock_code)"
+    else:
+        order_by = "(code)"
+    ensure_table(ch, table, df, order_by)
     records = [tuple(row) for row in df[cols].values]
     ch.execute(f"INSERT INTO {table} ({', '.join(cols)}) VALUES", records)
     return len(df)
