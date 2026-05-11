@@ -306,7 +306,7 @@ class JQDataSync:
             else:
                 logger.warning(f"{table} 无 checkpoint 且无数据，跳过增量同步（请先执行全量同步）")
                 return 0
-        end = (date.today() - timedelta(days=1)).isoformat()
+        end = date.today().isoformat()
         if start > end:
             logger.info(f"{table} 已是最新，无需增量同步")
             return 0
@@ -392,7 +392,7 @@ class JQDataSync:
             else:
                 logger.warning("index_daily 无 checkpoint 且无数据，跳过增量同步")
                 return 0
-        end = (date.today() - timedelta(days=1)).isoformat()
+        end = date.today().isoformat()
         if start > end:
             logger.info("index_daily 已是最新，无需增量同步")
             return 0
