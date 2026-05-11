@@ -6,7 +6,7 @@
   - 每日数据: valuation (2020-01-01 ~ 今天)
 
 环境变量:
-  JQ_USER / JQ_PASS / CH_HOST / CH_DB / REDIS_HOST / REDIS_PORT
+  JQ_USER / JQ_PASS / CH_HOST / CH_DB
 """
 import os, sys, time, logging
 from datetime import date
@@ -22,7 +22,6 @@ JQ_USER = os.getenv("JQ_USER")
 JQ_PASS = os.getenv("JQ_PASS")
 CH_HOST = os.getenv("CH_HOST", "localhost")
 CH_DB   = os.getenv("CH_DB", "jqdata")
-DAILY_QUOTA_LIMIT = int(os.getenv("DAILY_QUOTA_LIMIT", "180000000"))
 
 TABLE_MAP = {
     "balance":   jq.balance,
@@ -32,7 +31,6 @@ TABLE_MAP = {
     "valuation": jq.valuation,
 }
 
-# ClickHouse 类型映射
 CH_TYPE = {
     "int64":   "Float64",
     "float64": "Float64",
@@ -42,8 +40,12 @@ CH_TYPE = {
 def _ch_type(dtype):
     return CH_TYPE.get(str(dtype).lower(), "String")
 
+def _clean_col(name: str) -> str:
+    """ClickHouse 字段名清理：替换不合法字符"""
+    return name.replace(".", "_").replace(" ", "_").replace("-", "_")
+
 def ensure_table(ch: Client, table: str, df: pd.DataFrame):
-    """根据 DataFrame 字段动态建表"""
+    """根据 DataFrame 字段动态建表（列名已清理）"""
     cols = []
     order_key = "(code, statDate)"
     for c in df.columns:
@@ -74,9 +76,11 @@ def sync_quarterly(ch: Client, table: str, stat_dates: list):
             if "id" in df.columns:
                 df = df.drop(columns=["id"])
             df = df.where(pd.notna(df), None)
+            # 清理列名
+            df = df.rename(columns={c: _clean_col(c) for c in df.columns})
             ensure_table(ch, table, df)
-            cols = df.columns.tolist()
-            records = [tuple(row) for row in df.values]
+            cols = [c for c in df.columns]
+            records = [tuple(row) for row in df[cols].values]
             ch.execute(f"INSERT INTO {table} ({', '.join(cols)}) VALUES", records)
             total += len(df)
             logger.info(f"{table} {stat_date}: {len(df)} rows, total={total}")
@@ -96,9 +100,10 @@ def sync_valuation(ch: Client, dates: list):
             if "id" in df.columns:
                 df = df.drop(columns=["id"])
             df = df.where(pd.notna(df), None)
+            df = df.rename(columns={c: _clean_col(c) for c in df.columns})
             ensure_table(ch, "valuation", df)
-            cols = df.columns.tolist()
-            records = [tuple(row) for row in df.values]
+            cols = [c for c in df.columns]
+            records = [tuple(row) for row in df[cols].values]
             ch.execute(f"INSERT INTO valuation ({', '.join(cols)}) VALUES", records)
             total += len(df)
             if total % 100000 == 0:
