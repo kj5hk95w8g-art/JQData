@@ -255,7 +255,7 @@ class JQDataSync:
                             float(row.get("low_limit", 0) or 0),
                             float(row.get("avg", 0) or 0),
                             float(row.get("pre_close", 0) or 0),
-                            int(row.get("paused", 0) or 0),
+                            int(row["paused"]) if pd.notna(row.get("paused")) else 0,
                         )
                     )
                     if len(records) >= INSERT_BATCH:
