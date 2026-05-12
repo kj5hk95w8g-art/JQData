@@ -22,12 +22,15 @@
 
 ## 基础设施速查
 
+> **跨项目权威定义** → [SSOT/docs/server-topology.md](https://github.com/kj5hk95w8g-art/SSOT/blob/main/docs/server-topology.md)  
+> JQData 项目不再单独维护服务器列表，以 SSOT 文档为准。
+
 | 服务器 | 配置 | 角色 | SSH |
 |--------|------|------|-----|
 | D `101.132.161.52` | 8核 64GB | ClickHouse主 + Redis + FastAPI + Nginx + Prometheus | `ssh jqdata-d` |
-| C `139.196.186.67` | 4核 32GB | Grafana 可视化 | `ssh jqdata-c` |
+| C `139.196.186.67` | 4核 32GB | Grafana 可视化 + SSOT nav-collector 生产 | `ssh jqdata-c` |
 | A `106.14.141.212` | 4核 16GB | 应用服务器（资产沃土/云图中心，❌不动） | — |
-| B `139.196.34.92` | 4核 16GB | 测试服务器（现有环境，❌不动） | — |
+| B `139.196.34.92` | 4核 16GB | 测试服务器（SSOT nav-collector 测试验证） | — |
 
 ---
 
