@@ -1,30 +1,30 @@
 # JQData 本地行情数据平台 — AI 助手操作约束
 
 > 本文档是 AI 助手的**强制性操作约束手册**。违反任何红线规则 → 立即停止操作。
+> 通用规则继承 `~/.ai-rules/`（001~007），本文档只包含 **JQData 特有规则**。
 >
 > 完整文档导航 → [`README.md`](./README.md)
 
 ---
 
-## 一、红线规则（违规即停止）
+## 一、红线规则（项目特有补充）
+
+通用红线见 `~/.ai-rules/002-security.yml`，以下为本项目特有：
 
 | 红线 | 说明 |
 |------|------|
 | ❌ 修改生产数据库表结构 | 需用户明确"同意"，且必须先备份 |
-| ❌ 在服务器上手动创建表/导入数据/配置定时任务 | 必须代码化，通过部署脚本执行 |
 | ❌ 擅自重启 ClickHouse / Redis 生产实例 | 需用户明确"同意"，先确认无活跃查询 |
 | ❌ 直接操作 JQData 账号做测试 | 测试必须用本地数据集，禁止浪费正式账号流量 |
-| ❌ 在服务器上明文存储密码/token | 必须走环境变量或密钥管理服务 |
 | ❌ 将行情数据导出到公网/外发 | 金融数据仅限内网使用 |
+| ❌ 在全市场范围执行无限制查询 | 查询必须带时间范围和标的限制 |
 | ❌ 直接 push 到 main | 必须走 feature → develop → 测试 → PR → main |
 | ❌ 测试未通过就部署到 C/D 生产服务器 | 必须先在本地或测试环境验证 |
 | ❌ root 登录服务器操作 | 使用 deploy 用户 + 免密 sudo docker |
 | ❌ 修改服务器上的 `.env` 文件 | 只提供建议，用户执行或走配置注入 |
-| ❌ 使用 `--no-verify` / `--no-edit` | 遇到检查失败须报告用户 |
 | ❌ 未经同意修改防火墙/安全组规则 | 包括 iptables、阿里云安全组等 |
-| ❌ 边排查边修改生产数据 | 排查阶段只读。定位根因 → 报告 → 获同意 → 执行 → 验证 |
-| ❌ 日志/打印输出敏感信息 | JQData账号、密码、数据库连接串等必须先脱敏 |
-| ❌ 在全市场范围执行无限制查询 | 查询必须带时间范围和标的限制 |
+| ❌ 边排查边修改生产数据 | 排查阶段只读（见 `~/.ai-rules/002-security.yml §security.no_side_effect_debug`） |
+| ❌ 日志/打印输出敏感信息 | JQData账号、密码、数据库连接串等必须先脱敏（见 `~/.ai-rules/002-security.yml`） |
 | ❌ 认为 push tag = 自动部署 | tag 推送后不会自动部署，必须手动 SSH 执行 deploy.sh |
 | ❌ AI 擅自执行 release.sh | 发版前必须逐项汇报，获用户"同意发版"后方可执行 |
 
@@ -71,7 +71,7 @@ Host jqdata-d
 
 ---
 
-## 三、分支/发版/部署（速查）
+## 三、分支/发版/部署（项目特有）
 
 | 分支 | 用途 | 合并目标 |
 |------|------|---------|
@@ -81,25 +81,10 @@ Host jqdata-d
 | `fix/xxx` | Bug 修复 | → `develop` |
 | `hotfix/xxx` | 紧急修复 | 从 `main` 切出，**必须同步到 `develop`** |
 
-**发版（本地执行）：**
-```bash
-./scripts/release.sh patch   # 或 minor / major
-```
-自动完成：版本号 bump → 更新 `version.txt` → commit → 打 tag → push
+**发版：** `./scripts/release.sh patch`（或 minor / major）  
+**部署：** SSH 登录服务器执行 `./scripts/deploy.sh v0.1.x`
 
-> ⚠️ **发版前必须汇报**：逐项检查 Git 状态、分支、版本号，获用户"同意发版"后方可执行。
-
-**部署（SSH 登录服务器执行）：**
-```bash
-# D 服务器
-ssh jqdata-d 'cd /data/jqdata-platform && ./scripts/deploy.sh v0.1.x'
-
-# C 服务器
-ssh jqdata-c 'cd /data/jqdata-platform && ./scripts/deploy.sh v0.1.x'
-```
-自动完成：fetch tag → checkout → docker compose up -d → 健康检查 → 失败回滚
-
-> ⚠️ **部署前必须汇报**：tag 推送后不会自动部署。必须等待用户明确"同意部署"后，方可登录服务器执行。
+> 通用发版/部署规范见 `~/.ai-rules/004-deployment.yml`
 
 **数据变更：** 表结构变更必须写成迁移脚本（`migrations/VXXX__description.sql`），禁止手动 `ALTER TABLE`。
 
@@ -107,56 +92,29 @@ ssh jqdata-c 'cd /data/jqdata-platform && ./scripts/deploy.sh v0.1.x'
 
 ## 四、需求管理
 
-状态流转：`待评审 → 已排期 → 开发中 → 待测试 → 已发布`
+通用规范见 `~/.ai-rules/005-documentation.yml`，本项目特有：
 
-编号：`REQ-NNN`。Commit 格式：`类型(范围): 描述` + `Closes REQ-XXX`。
-
-| 类型 | 用途 |
-|------|------|
-| `feat` | 新功能/新接口 |
-| `fix` | Bug 修复 |
-| `data` | 数据同步/数据修复 |
-| `perf` | 性能优化 |
-| `refactor` | 重构 |
-| `docs` | 文档 |
-| `test` | 测试 |
-| `deploy` | 部署/运维 |
-| `chore` | 杂项 |
+状态流转：`待评审 → 已排期 → 开发中 → 待测试 → 已发布`  
+编号：`REQ-NNN`。Commit 格式：`类型(范围): 描述` + `Closes REQ-XXX`。  
+类型：`feat` \| `fix` \| `data` \| `perf` \| `refactor` \| `docs` \| `test` \| `deploy` \| `chore`
 
 ---
 
 ## 五、文档管理
 
+通用规范见 `~/.ai-rules/005-documentation.yml`，本项目特有：
+
 - 命名：kebab-case（例外：`README.md`, `CHANGELOG.md`, `AGENTS.md`, `TODO.md`）
 - 谁修改谁更新，废弃文件移到 `docs/archive/`
-- 设计文档是执行契约，代码修改必须同步文档
 - 表结构变更必须同步 `docs/database-schema.md`
 - API 变更必须同步 `docs/api-reference.md`
 - 新增文档准入：全新领域 / 现有文档超 500 行 / 说明为何不更新现有文档
 
 ---
 
-## 六、排查与修复流程
+## 六、数据操作规范（项目特有）
 
-**口诀：停一查二报三等四改五验**
-
-1. **停** — 发现问题立即停止操作，评估影响范围
-2. **查** — 只读排查，看日志/监控/数据状态，定位根因
-3. **报** — 向用户报告问题现象、影响范围、根因分析
-4. **等** — 等用户确认修复方案
-5. **改** — 获同意后执行修复
-6. **验** — 验证修复结果，确认数据一致性
-
-**生产环境 ClickHouse 故障排查优先查看：**
-- `docker logs clickhouse` — 服务日志
-- `system.query_log` — 慢查询分析
-- `system.replication_queue` — 主从复制状态
-
----
-
-## 七、数据操作规范
-
-### 7.1 查询约束
+### 6.1 查询约束
 
 | 操作类型 | 约束 |
 |---------|------|
@@ -166,7 +124,7 @@ ssh jqdata-c 'cd /data/jqdata-platform && ./scripts/deploy.sh v0.1.x'
 | `SELECT *` | 禁止，必须指定字段 |
 | `JOIN` 操作 | 优先在应用层做，避免大数据量 JOIN |
 
-### 7.2 写入约束
+### 6.2 写入约束
 
 | 操作类型 | 约束 |
 |---------|------|
@@ -175,7 +133,7 @@ ssh jqdata-c 'cd /data/jqdata-platform && ./scripts/deploy.sh v0.1.x'
 | 重复写入 | 必须幂等，使用 `ReplacingMergeTree` 或插入前查重 |
 | 删除数据 | 禁止 `DELETE`，使用 `ALTER TABLE ... DROP PARTITION` 或 TTL |
 
-### 7.3 JQData 流量管理
+### 6.3 JQData 流量管理
 
 - 正式账号每日约 1000 万条额度
 - 全市场日线约 5200 条/天，分钟线约 120 万条/天
@@ -184,7 +142,7 @@ ssh jqdata-c 'cd /data/jqdata-platform && ./scripts/deploy.sh v0.1.x'
 
 ---
 
-## 八、AI Skill 速查
+## 七、AI Skill 速查
 
 | 场景 | 直接说 | Skill |
 |------|--------|-------|
@@ -199,7 +157,7 @@ ssh jqdata-c 'cd /data/jqdata-platform && ./scripts/deploy.sh v0.1.x'
 
 ---
 
-## 九、快速参考
+## 八、快速参考
 
 | 内容 | 文档 |
 |------|------|
@@ -209,31 +167,11 @@ ssh jqdata-c 'cd /data/jqdata-platform && ./scripts/deploy.sh v0.1.x'
 | 部署运维手册 | `docs/deployment-guide.md` |
 | 需求池与当前状态 | `docs/TODO.md` |
 | 开发流程 | `docs/development-workflow.md` |
-| 分发平台设计 | `docs/requirements/REQ-004.md` |
 | 变更日志 | `CHANGELOG.md` |
 
 ---
 
-## 附录A：日志脱敏规范
-
-**红线：禁止在日志/打印中输出未经脱敏的敏感信息。**
-
-| 信息类型 | 脱敏前 | 脱敏后 | 脱敏方式 |
-|---------|--------|--------|---------|
-| JQData 账号 | `13812345678` | `138****5678` | 中间4位隐藏 |
-| 密码/token | `any_value` | `***` | 完全不输出 |
-| 数据库连接串 | `clickhouse://user:pass@host/db` | `clickhouse://user:***@host/db` | 密码替换为 `***` |
-| 服务器 IP | `101.132.161.52` | `101.***.***.52` | 中间两段隐藏 |
-| API Key | `ak_xxxxxxxxxxxx` | `ak_****` | 前4位+`****` |
-
-**检查清单（代码审查必检）：**
-- [ ] `print()` / `logger.info()` / `logger.debug()` 中是否包含 `password`、`token`、`secret`、`key`、`auth`？
-- [ ] 异常信息 `str(e)` 是否可能泄露数据库连接串、文件路径等敏感信息？
-- [ ] API 返回的 error message 是否包含原始异常堆栈或敏感字段？
-
----
-
-## 附录B：金融数据安全规范
+## 附录：金融数据安全规范（项目特有）
 
 1. **数据不出内网**：行情数据仅限 VPC 内网访问
 2. **禁止截屏外发**：含股票行情的页面禁止截图发到外部
@@ -242,5 +180,5 @@ ssh jqdata-c 'cd /data/jqdata-platform && ./scripts/deploy.sh v0.1.x'
 
 ---
 
-*最后更新：2026-05-09*  
-*版本：v2.1.0 — 参照沃土文档体系重构，增加部署约束、AI Skill 速查、快速参考*
+*最后更新：2026-05-13*  
+*版本：v2.2.0 — 瘦身：删除通用规则重复内容，引用 ~/.ai-rules/；新增 Feature 文档约束*
