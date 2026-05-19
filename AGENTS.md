@@ -18,15 +18,6 @@
 | ❌ 直接操作 JQData 账号做测试 | 测试必须用本地数据集，禁止浪费正式账号流量 |
 | ❌ 将行情数据导出到公网/外发 | 金融数据仅限内网使用 |
 | ❌ 在全市场范围执行无限制查询 | 查询必须带时间范围和标的限制 |
-| ❌ 直接 push 到 main | 必须走 feature → develop → 测试 → PR → main |
-| ❌ 测试未通过就部署到 C/D 生产服务器 | 必须先在本地或测试环境验证 |
-| ❌ root 登录服务器操作 | 使用 deploy 用户 + 免密 sudo docker |
-| ❌ 修改服务器上的 `.env` 文件 | 只提供建议，用户执行或走配置注入 |
-| ❌ 未经同意修改防火墙/安全组规则 | 包括 iptables、阿里云安全组等 |
-| ❌ 边排查边修改生产数据 | 排查阶段只读（见 `~/.ai-rules/002-security.yml §security.no_side_effect_debug`） |
-| ❌ 日志/打印输出敏感信息 | JQData账号、密码、数据库连接串等必须先脱敏（见 `~/.ai-rules/002-security.yml`） |
-| ❌ 认为 push tag = 自动部署 | tag 推送后不会自动部署，必须手动 SSH 执行 deploy.sh |
-| ❌ AI 擅自执行 release.sh | 发版前必须逐项汇报，获用户"同意发版"后方可执行 |
 
 ---
 
@@ -36,7 +27,7 @@
 
 | 代号 | 角色 | 公网IP | 配置 | 部署内容 | 约束 |
 |------|------|--------|------|---------|------|
-| **A** | 应用服务器 | `106.14.141.212` | 4核 16GB | 资产沃土/云图中心（核心业务❌不动）+ **node-exporter（监控，经同意部署）** | 核心业务禁止部署新组件；监控组件需用户明确同意 |
+| **A** | 应用服务器 | `106.14.141.212` | 4核 16GB | 资产沃土/云图中心（核心业务❌不动）+ **node-exporter（监控，经同意部署）** | 核心业务禁止部署新组件 |
 | **B** | 测试服务器 | `139.196.34.92` | 4核 16GB | **❌ 不动**（现有测试环境） | 禁止修改 |
 | **C** | 可视化/调度 | `139.196.186.67` | 4核 32GB | Grafana + Airflow（待建） | docker-compose，deploy 用户 |
 | **D** | 核心数据层 | `101.132.161.52` | 8核 64GB | ClickHouse + Redis + FastAPI + Nginx | docker-compose，deploy 用户 |
@@ -61,7 +52,7 @@ Host jqdata-d
 |------|--------|------|------|
 | ClickHouse | `clickhouse` | 8123(HTTP) / 9000(Native) | D 服务器 |
 | Redis | `redis` | 6379 | D 服务器 |
-| FastAPI | `api` | 8000（仅容器内，宿主机不映射） | D 服务器 |
+| FastAPI | `api` | 8000（仅容器内） | D 服务器 |
 | Nginx | `nginx` | 18080（公网暴露） | D 服务器 |
 | Prometheus | `prometheus` | 9090 | D 服务器 |
 | node-exporter | `node-exporter` | 9100 | D 服务器 |
@@ -71,7 +62,11 @@ Host jqdata-d
 
 ---
 
-## 三、分支/发版/部署（项目特有）
+## 三、分支/发版/部署
+
+通用规范见 [`~/.ai-rules/001-git.yml`](~/.ai-rules/001-git.yml) 和 [`~/.ai-rules/004-deployment.yml`](~/.ai-rules/004-deployment.yml)。
+
+本项目特有：
 
 | 分支 | 用途 | 合并目标 |
 |------|------|---------|
@@ -81,10 +76,8 @@ Host jqdata-d
 | `fix/xxx` | Bug 修复 | → `develop` |
 | `hotfix/xxx` | 紧急修复 | 从 `main` 切出，**必须同步到 `develop`** |
 
-**发版：** `./scripts/release.sh patch`（或 minor / major）  
-**部署：** SSH 登录服务器执行 `./scripts/deploy.sh v0.1.x`
-
-> 通用发版/部署规范见 `~/.ai-rules/004-deployment.yml`
+- **发版：** `./scripts/release.sh patch`（或 minor / major）
+- **部署：** SSH 登录服务器执行 `./scripts/deploy.sh v0.1.x`
 
 **数据变更：** 表结构变更必须写成迁移脚本（`migrations/VXXX__description.sql`），禁止手动 `ALTER TABLE`。
 
@@ -92,17 +85,22 @@ Host jqdata-d
 
 ## 四、需求管理
 
-通用规范见 `~/.ai-rules/005-documentation.yml`，本项目特有：
+通用规范见 [`~/.ai-rules/005-documentation.yml`](~/.ai-rules/005-documentation.yml)。
 
-状态流转：`待评审 → 已排期 → 开发中 → 待测试 → 已发布`  
-编号：`REQ-NNN`。Commit 格式：`类型(范围): 描述` + `Closes REQ-XXX`。  
-类型：`feat` \| `fix` \| `data` \| `perf` \| `refactor` \| `docs` \| `test` \| `deploy` \| `chore`
+本项目特有：
+
+- 状态流转：`待评审 → 已排期 → 开发中 → 待测试 → 已发布`
+- 编号：`REQ-NNN`
+- Commit 格式：`类型(范围): 描述` + `Closes REQ-XXX`
+- 类型：`feat` \| `fix` \| `data` \| `perf` \| `refactor` \| `docs` \| `test` \| `deploy` \| `chore`
 
 ---
 
 ## 五、文档管理
 
-通用规范见 `~/.ai-rules/005-documentation.yml`，本项目特有：
+通用规范见 [`~/.ai-rules/005-documentation.yml`](~/.ai-rules/005-documentation.yml)。
+
+本项目特有：
 
 - 命名：kebab-case（例外：`README.md`, `CHANGELOG.md`, `AGENTS.md`, `TODO.md`）
 - 谁修改谁更新，废弃文件移到 `docs/archive/`
@@ -112,7 +110,7 @@ Host jqdata-d
 
 ---
 
-## 六、数据操作规范（项目特有）
+## 六、数据操作规范
 
 ### 6.1 查询约束
 
@@ -142,22 +140,33 @@ Host jqdata-d
 
 ---
 
-## 七、AI Skill 速查
+## 七、Python 与测试规范
 
-| 场景 | 直接说 | Skill |
-|------|--------|-------|
-| 检查代码 | "检查代码" / "review代码" | `code-quality-guard` |
-| 检查表结构 | "检查表结构" / "schema对不对" | `schema-validator` |
-| 数据同步检查 | "检查同步状态" / "今天数据齐了吗" | `sync-status-checker` |
-| 数据质量检查 | "检查数据质量" / "有没有缺数据" | `data-quality-checker` |
-| 性能分析 | "查询好慢" / "优化一下" | `query-performance-analyzer` |
-| 部署检查 | "准备部署" / "检查部署条件" | `deploy-guard` |
-| API 测试 | "测试API" / "接口通不通" | `api-smoke-test` |
-| 因子计算 | "计算MA" / "算一下RSI" | `factor-calculator` |
+通用规范见 `~/.ai-rules/`：
+
+- **`003-python.yml`**：配置走环境变量、新增环境变量同步 `.env.example`、公共函数类型注解建议、优先使用 logging、敏感信息禁止入代码库
+- **`006-testing.yml`**：核心逻辑单元测试覆盖率建议 > 70%、外部依赖必须 mock、数据计算类必须测试边界条件、每个任务交付前须有验收脚本、测试禁止使用生产数据
 
 ---
 
-## 八、快速参考
+## 八、AI Skill 速查
+
+> 通用 Skill 从 `~/.kimi/skills/` 自动加载；项目特有 Skill 从 `.agents/skills/` 加载。
+
+| 场景 | 直接说 | Skill | 位置 |
+|------|--------|-------|------|
+| 检查代码 | "检查代码" / "review代码" | `code-quality-guard` | `~/.kimi/skills/` |
+| 检查表结构 | "检查表结构" / "schema对不对" | `schema-validator` | `.agents/skills/` |
+| 数据同步检查 | "检查同步状态" / "今天数据齐了吗" | `sync-status-checker` | `.agents/skills/` |
+| 数据质量检查 | "检查数据质量" / "有没有缺数据" | `data-quality-checker` | `.agents/skills/` |
+| 性能分析 | "查询好慢" / "优化一下" | `query-performance-analyzer` | `.agents/skills/` |
+| 部署检查 | "准备部署" / "检查部署条件" | `deploy-guard` | `.agents/skills/` |
+| API 测试 | "测试API" / "接口通不通" | `api-smoke-test` | `~/.kimi/skills/` |
+| 因子计算 | "计算MA" / "算一下RSI" | `factor-calculator` | `.agents/skills/` |
+
+---
+
+## 九、快速参考
 
 | 内容 | 文档 |
 |------|------|
@@ -171,7 +180,7 @@ Host jqdata-d
 
 ---
 
-## 附录：金融数据安全规范（项目特有）
+## 附录：金融数据安全规范
 
 1. **数据不出内网**：行情数据仅限 VPC 内网访问
 2. **禁止截屏外发**：含股票行情的页面禁止截图发到外部
@@ -180,5 +189,5 @@ Host jqdata-d
 
 ---
 
-*最后更新：2026-05-13*  
-*版本：v2.2.0 — 瘦身：删除通用规则重复内容，引用 ~/.ai-rules/；新增 Feature 文档约束*
+*最后更新：2026-05-12*  
+*版本：v2.3.0 — 瘦身：删除通用规则重复内容，引用 ~/.ai-rules/；增加公共 Skill 池引用*

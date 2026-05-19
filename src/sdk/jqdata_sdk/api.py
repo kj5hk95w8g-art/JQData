@@ -189,6 +189,53 @@ def get_industry(
     return output
 
 
+def get_valuation(
+    security_list: Union[str, List[str]],
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    fields: Optional[Union[str, List[str]]] = None,
+    count: Optional[int] = None,
+) -> pd.DataFrame:
+    """
+    获取个股市值表数据（模仿 jqdatasdk.get_valuation）
+
+    Args:
+        security_list: 单只代码(str)或多只(list)
+        start_date: 起始日期 'YYYY-MM-DD'
+        end_date: 结束日期 'YYYY-MM-DD'
+        fields: 字段列表，如 ['pe_ratio','pb_ratio','market_cap']
+        count: 最近 count 个交易日
+
+    Returns:
+        DataFrame 含列: code, day, pe_ratio, pb_ratio, market_cap 等
+    """
+    client = _get_client()
+    codes = [security_list] if isinstance(security_list, str) else list(security_list)
+    codes_str = ",".join(codes)
+
+    params = {"codes": codes_str}
+    if start_date:
+        params["start_date"] = start_date
+    if end_date:
+        params["end_date"] = end_date
+    if fields:
+        if isinstance(fields, list):
+            params["fields"] = ",".join(fields)
+        else:
+            params["fields"] = fields
+    if count:
+        params["count"] = count
+
+    result = client.get("/v1/valuation", params=params)
+    rows = result.get("data", [])
+    cols = result.get("fields", ["code", "day"])
+
+    df = pd.DataFrame(rows, columns=cols)
+    if "day" in df.columns:
+        df["day"] = pd.to_datetime(df["day"])
+    return df
+
+
 def get_xr_xd(
     codes: Union[str, List[str], None] = None,
     start_date: Optional[str] = None,

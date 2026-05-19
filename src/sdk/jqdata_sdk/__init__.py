@@ -40,6 +40,7 @@ from .api import (
     get_index_stocks,
     get_index_weights,
     get_industry,
+    get_valuation,
     get_xr_xd,
     get_query_count,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "get_index_stocks",
     "get_index_weights",
     "get_industry",
+    "get_valuation",
     "get_xr_xd",
     "normalize_code",
     "get_query_count",
@@ -76,6 +78,7 @@ def info() -> None:
         ("指数", "get_index_stocks", "指数成分股代码"),
         ("指数", "get_index_weights", "指数成分股+权重"),
         ("行业", "get_industry", "申万行业分类 (sw_l1/l2/l3)"),
+        ("行情", "get_valuation", "个股市值表 (PE/PB/市值等)"),
         ("除权除息", "get_xr_xd", "分红送转事件"),
         ("宏观", "macro.run_query", "宏观数据查询 (MAC_BOND_YIELD_10Y等)"),
         ("工具", "normalize_code", "代码标准化 (000001→000001.XSHE)"),

@@ -225,6 +225,84 @@ def get_industry(
     return {"count": len(result), "data": result}
 
 
+# ── 市值表查询 ──
+COLUMN_MAP_VALUATION = {
+    "trade_date": "day",
+    "code": "code",
+    "pe_ratio": "pe_ratio",
+    "pb_ratio": "pb_ratio",
+    "ps_ratio": "ps_ratio",
+    "pcf_ratio": "pcf_ratio",
+    "turnover_ratio": "turnover_ratio",
+    "market_cap": "market_cap",
+    "circulating_market_cap": "circulating_market_cap",
+    "total_shares": "capitalization",
+    "circulating_shares": "circulating_cap",
+    "pe_ratio_lyr": "pe_ratio_lyr",
+}
+
+
+@app.get("/v1/valuation")
+def get_valuation(
+    codes: str = Query(None, description="股票代码，逗号分隔"),
+    start_date: str = Query(None, description="起始日期 YYYY-MM-DD"),
+    end_date: str = Query(None, description="结束日期 YYYY-MM-DD"),
+    fields: str = Query(None, description="字段，逗号分隔，如 pe_ratio,pb_ratio,market_cap"),
+):
+    """获取个股市值表数据（模仿 jqdatasdk.get_valuation）"""
+    table = "stock_valuation"
+    code_list = [c.strip() for c in codes.split(",")] if codes else None
+    
+    # 默认返回字段（模仿 jqdatasdk）
+    if fields:
+        field_list = [f.strip() for f in fields.split(",")]
+    else:
+        field_list = ["pe_ratio", "pb_ratio", "ps_ratio", "pcf_ratio",
+                      "turnover_ratio", "market_cap", "circulating_market_cap"]
+    
+    # 构建 SELECT 列（ClickHouse → jqdatasdk 字段名）
+    select_cols = []
+    output_cols = []
+    for f in field_list:
+        # 找到 ClickHouse 列名（反向映射）
+        ch_col = None
+        for ch_name, jq_name in COLUMN_MAP_VALUATION.items():
+            if jq_name == f:
+                ch_col = ch_name
+                break
+        if ch_col:
+            select_cols.append(ch_col)
+            output_cols.append(f)
+    
+    if not select_cols:
+        return {"count": 0, "data": [], "fields": [], "error": "no valid fields"}
+    
+    # 始终包含 code 和 day
+    select_str = "code, trade_date AS day, " + ", ".join(select_cols)
+    
+    query_sql = f"SELECT {select_str} FROM {table} WHERE 1=1"
+    params = {}
+    
+    if code_list:
+        query_sql += " AND code IN %(codes)s"
+        params["codes"] = code_list
+    if start_date:
+        query_sql += " AND trade_date >= %(start_date)s"
+        params["start_date"] = start_date
+    if end_date:
+        query_sql += " AND trade_date <= %(end_date)s"
+        params["end_date"] = end_date
+    
+    query_sql += " ORDER BY code, trade_date"
+    rows = ch.execute(query_sql, params)
+    
+    return {
+        "count": len(rows),
+        "fields": ["code", "day"] + output_cols,
+        "data": rows
+    }
+
+
 # ── 除权除息 ──
 @app.get("/v1/xr_xd")
 def get_xr_xd(
