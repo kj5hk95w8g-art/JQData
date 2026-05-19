@@ -15,7 +15,7 @@ import redis
 app = FastAPI(
     title="JQData Platform API",
     description="公司内部金融数据查询服务",
-    version="2.1.0"
+    version="2.2.0"
 )
 
 # ── 配置 ──
