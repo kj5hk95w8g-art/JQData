@@ -30,9 +30,16 @@ def rows_to_dataframe(rows: list, columns: list, index_col: str = "trade_date") 
     if not rows:
         return pd.DataFrame(columns=columns)
     df = pd.DataFrame(rows, columns=columns)
-    # 日期列转为 datetime
+    # 日期列转为 datetime（兼容 str、int Unix 时间戳、datetime 对象）
     if index_col in df.columns:
-        df[index_col] = pd.to_datetime(df[index_col])
+        col = df[index_col]
+        if col.dtype == 'object':
+            df[index_col] = pd.to_datetime(col)
+        elif pd.api.types.is_numeric_dtype(col):
+            # Unix 时间戳（秒）
+            df[index_col] = pd.to_datetime(col, unit='s')
+        else:
+            df[index_col] = pd.to_datetime(col)
     return df
 
 

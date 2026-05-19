@@ -52,9 +52,16 @@ def get_price(
         rows = result.get("data", [])
         # 空结果时自动回退到指数端点（如 000300.XSHG）
         if not rows:
-            result = client.get(f"/v1/index/{codes[0]}", params=params)
+            # 指数端点需要 trade_date 作为首列
+            index_params = {"start": start_date, "end": end_date, "fq": fq}
+            index_fields = "trade_date" if not fields_str else f"trade_date,{fields_str}"
+            index_params["fields"] = index_fields
+            result = client.get(f"/v1/index/{codes[0]}", params=index_params)
             rows = result.get("data", [])
-        cols = (fields or "trade_date,open,high,low,close,volume,amount").split(",")
+            # 更新 cols 以包含 trade_date
+            cols = ("trade_date," + (fields_str or "open,high,low,close,volume,amount")).split(",")
+        else:
+            cols = (fields_str or "trade_date,open,high,low,close,volume,amount").split(",")
         cols = [c.strip() for c in cols]
         df = rows_to_dataframe(rows, cols)
         if panel and "trade_date" in df.columns:
