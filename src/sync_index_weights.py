@@ -97,6 +97,9 @@ def sync_full(ch: Client):
                 df = df.rename(columns={code_col: "code"})
                 df["index_code"] = jq_code
                 df["index_name"] = name
+                # 转换 date 列为字符串（ClickHouse 列类型为 String）
+                if "date" in df.columns:
+                    df["date"] = df["date"].astype(str)
                 cols = ["code", "date", "weight", "display_name", "index_code", "index_name"]
                 cols = [c for c in cols if c in df.columns]
                 records = [tuple(row) for row in df[cols].values]
