@@ -50,22 +50,22 @@ BENCHMARKS = [
 ]
 
 
-def ensure_index_component_table(ch: Client):
-    """创建 index_component 表（如不存在）"""
+def ensure_index_weights_table(ch: Client):
+    """创建 index_weights 表（如不存在）"""
     ch.execute("""
-        CREATE TABLE IF NOT EXISTS index_component (
-            index_code LowCardinality(String),
+        CREATE TABLE IF NOT EXISTS index_weights (
             code String,
-            trade_date Date,
+            date String,
             weight Float64,
             display_name String,
-            created_at DateTime DEFAULT now()
+            index_code String,
+            index_name String,
+            sync_date DateTime DEFAULT now()
         ) ENGINE = MergeTree
-        PARTITION BY toYYYYMM(trade_date)
-        ORDER BY (index_code, trade_date, code)
+        ORDER BY (index_code, date, code)
         SETTINGS index_granularity = 8192
     """)
-    logger.info("index_component 表就绪")
+    logger.info("index_weights 表就绪")
 
 
 def sync_full(ch: Client):
@@ -96,13 +96,12 @@ def sync_full(ch: Client):
                 code_col = "code" if "code" in df.columns else df.columns[0]
                 df = df.rename(columns={code_col: "code"})
                 df["index_code"] = jq_code
-                df = df.rename(columns={"date": "trade_date"})
-                cols = ["index_code", "code", "trade_date", "weight", "display_name"]
-                # 只保留存在的列
+                df["index_name"] = name
+                cols = ["code", "date", "weight", "display_name", "index_code", "index_name"]
                 cols = [c for c in cols if c in df.columns]
                 records = [tuple(row) for row in df[cols].values]
                 ch.execute(
-                    f"INSERT INTO index_component ({', '.join(cols)}) VALUES", records
+                    f"INSERT INTO index_weights ({', '.join(cols)}) VALUES", records
                 )
                 idx_total += len(records)
             except Exception as e:
@@ -142,17 +141,17 @@ def sync_incremental(ch: Client):
                 code_col = "code" if "code" in df.columns else df.columns[0]
                 df = df.rename(columns={code_col: "code"})
                 df["index_code"] = jq_code
-                df = df.rename(columns={"date": "trade_date"})
-                cols = ["index_code", "code", "trade_date", "weight", "display_name"]
+                df["index_name"] = name
+                cols = ["code", "date", "weight", "display_name", "index_code", "index_name"]
                 cols = [c for c in cols if c in df.columns]
                 records = [tuple(row) for row in df[cols].values]
                 # 幂等：删除旧数据再插入
                 ch.execute(
-                    "ALTER TABLE index_component DELETE WHERE index_code=%(idx)s AND trade_date=%(d)s",
+                    "ALTER TABLE index_weights DELETE WHERE index_code=%(idx)s AND date=%(d)s",
                     {"idx": jq_code, "d": d_str},
                 )
                 ch.execute(
-                    f"INSERT INTO index_component ({', '.join(cols)}) VALUES", records
+                    f"INSERT INTO index_weights ({', '.join(cols)}) VALUES", records
                 )
                 total += len(records)
             except Exception as e:
@@ -169,7 +168,7 @@ def main():
     jq.auth(JQ_USER, JQ_PASS)
     logger.info("JQData 认证成功")
     ch = Client(host=CH_HOST, database=CH_DB)
-    ensure_index_component_table(ch)
+    ensure_index_weights_table(ch)
 
     if SYNC_MODE == "incremental":
         sync_incremental(ch)
