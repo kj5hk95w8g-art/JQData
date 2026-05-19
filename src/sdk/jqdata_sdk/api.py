@@ -50,6 +50,10 @@ def get_price(
             params["fields"] = fields_str
         result = client.get(f"/v1/daily/{codes[0]}", params=params)
         rows = result.get("data", [])
+        # 空结果时自动回退到指数端点（如 000300.XSHG）
+        if not rows:
+            result = client.get(f"/v1/index/{codes[0]}", params=params)
+            rows = result.get("data", [])
         cols = (fields or "trade_date,open,high,low,close,volume,amount").split(",")
         cols = [c.strip() for c in cols]
         df = rows_to_dataframe(rows, cols)
