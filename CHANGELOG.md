@@ -4,6 +4,27 @@
 
 ---
 
+## [2.2.0] - 2026-05-19
+
+### 新增
+- SDK `get_index_weights(index_code, date)` — 指数成分股权重查询
+- SDK `get_industry(stock_codes, date, industry_type)` — 申万行业分类查询
+- SDK `get_xr_xd(codes, start_date, end_date)` — 除权除息事件查询（STK_XR_XD）
+- SDK `normalize_code(code)` — 代码标准化（纯本地函数）
+- SDK `macro` 子模块 — 宏观数据查询（MAC_BOND_YIELD_10Y 等）
+- 后端 `/v1/index/{code}/weights` — 指数成分股权重端点
+- 后端 `/v1/industry` — 行业分类查询端点
+- 后端 `/v1/xr_xd` — 除权除息查询端点
+- 后端 `/v1/macro/query`（POST）— 通用宏观数据查询端点
+- `src/sync_index_weights.py` — 指数成分权重同步脚本（全量+增量）
+- `sync_extended.py` 新增 MAC_BOND_YIELD_10Y 同步
+
+### 变更
+- SDK 版本号统一为 2.2.0（setup.py / __init__.py）
+- `get_index_stocks` 端点改为从 `index_component` 表查询（原为占位）
+
+---
+
 ## [0.1.4] - 2026-05-10
 
 ### 修复

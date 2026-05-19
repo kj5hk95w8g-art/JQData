@@ -36,6 +36,34 @@ def rows_to_dataframe(rows: list, columns: list, index_col: str = "trade_date") 
     return df
 
 
+def normalize_code(code: str) -> str:
+    """
+    代码标准化：纯数字 → JQData 格式（模仿 jqdatasdk.normalize_code）
+
+    Args:
+        code: 纯数字代码如 '000001' 或已含后缀的 '000001.XSHE'
+
+    Returns:
+        JQData 格式代码，或原样返回（无法识别/港股等）
+
+    Examples:
+        normalize_code('000001')  → '000001.XSHE'
+        normalize_code('600000')  → '600000.XSHG'
+        normalize_code('000001.XSHE') → '000001.XSHE'  # 已含后缀则原样
+    """
+    code = str(code).strip()
+    if '.' in code:
+        return code  # 已是完整格式
+    # 港股（5位纯数字）— 暂不支持
+    if len(code) == 5 and code.isdigit():
+        return code  # 无后缀，原样返回
+    if code.startswith(('6', '68', '5', '9')):
+        return f'{code}.XSHG'
+    if code.startswith(('0', '1', '3', '4', '8')):
+        return f'{code}.XSHE'
+    return code
+
+
 def to_jqdata_format(df: pd.DataFrame, panel: bool = True, code_col: str = "code") -> pd.DataFrame:
     """
     将 DataFrame 转为 jqdatasdk 风格：

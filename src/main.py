@@ -161,14 +161,122 @@ def get_index_stocks(
     code: str,
     trade_date: str = Query(None, description="权重日期，默认最新"),
 ):
-    """获取指数成分股列表（待 index_weights 表同步后实现）"""
-    return {
-        "code": code,
-        "trade_date": trade_date,
-        "count": 0,
-        "data": [],
-        "note": "index_weights 表尚未同步，请先执行正式版数据同步",
-    }
+    """获取指数成分股列表"""
+    table = "index_component"
+    query_sql = f"SELECT code, display_name, weight FROM {table} WHERE index_code=%(code)s"
+    params = {"code": code}
+    if trade_date:
+        query_sql += " AND trade_date=%(trade_date)s"
+        params["trade_date"] = trade_date
+    query_sql += " ORDER BY weight DESC"
+    try:
+        rows = ch.execute(query_sql, params)
+        return {"code": code, "trade_date": trade_date, "count": len(rows), "data": rows}
+    except Exception:
+        return {"code": code, "trade_date": trade_date, "count": 0, "data": [],
+                "note": "index_component 表尚未同步数据，请先执行 sync_index_weights.py"}
+
+
+# ── 指数成分权重 ──
+@app.get("/v1/index/{code}/weights")
+def get_index_weights(
+    code: str,
+    date: str = Query(None, description="权重日期 YYYY-MM-DD"),
+):
+    """获取指数成分股权重"""
+    table = "index_component"
+    query_sql = f"SELECT code, display_name, weight FROM {table} WHERE index_code=%(code)s"
+    params = {"code": code}
+    if date:
+        query_sql += " AND trade_date=%(date)s"
+        params["date"] = date
+    query_sql += " ORDER BY weight DESC"
+    try:
+        rows = ch.execute(query_sql, params)
+        return {"code": code, "date": date, "count": len(rows), "data": rows}
+    except Exception:
+        return {"code": code, "date": date, "count": 0, "data": [],
+                "note": "index_component 表尚未同步数据，请先执行 sync_index_weights.py"}
+
+
+# ── 行业分类 ──
+@app.get("/v1/industry")
+def get_industry(
+    codes: str = Query(None, description="股票代码，逗号分隔，如 000001.XSHE,000002.XSHE"),
+    date: str = Query(None, description="查询日期 YYYY-MM-DD"),
+    type: str = Query("sw_l1", description="行业分类标准：sw_l1/sw_l2/sw_l3"),
+):
+    """获取个股申万行业分类"""
+    table = "industry_stocks"
+    code_list = [c.strip() for c in codes.split(",")] if codes else None
+    query_sql = f"SELECT stock_code, industry_code, industry_name FROM {table} WHERE level=%(type)s"
+    params = {"type": type}
+    if code_list:
+        query_sql += " AND stock_code IN %(codes)s"
+        params["codes"] = code_list
+    if date:
+        query_sql += " AND date=%(date)s"
+        params["date"] = date
+    rows = ch.execute(query_sql, params)
+    # 转为 {code: {industry_name, industry_code}} 格式
+    result = {}
+    for stock_code, ind_code, ind_name in rows:
+        result[stock_code] = {"industry_name": ind_name, "industry_code": ind_code}
+    return {"count": len(result), "data": result}
+
+
+# ── 除权除息 ──
+@app.get("/v1/xr_xd")
+def get_xr_xd(
+    codes: str = Query(None, description="股票代码，逗号分隔"),
+    start_date: str = Query(None, description="除权日起始 YYYY-MM-DD"),
+    end_date: str = Query(None, description="除权日结束 YYYY-MM-DD"),
+):
+    """获取除权除息事件（分红送转）"""
+    table = "stk_xr_xd"
+    columns = "code,company_name,a_xr_date,bonus_type,dividend_ratio,transfer_ratio," \
+              "bonus_ratio_rmb,bonus_amount_rmb,a_registration_date,a_bonus_date," \
+              "plan_progress,implementation_pub_date,report_date"
+    query_sql = f"SELECT {columns} FROM {table} WHERE 1=1"
+    params = {}
+    if codes:
+        code_list = [c.strip() for c in codes.split(",")]
+        query_sql += " AND code IN %(codes)s"
+        params["codes"] = code_list
+    if start_date:
+        query_sql += " AND a_xr_date >= %(start_date)s"
+        params["start_date"] = start_date
+    if end_date:
+        query_sql += " AND a_xr_date <= %(end_date)s"
+        params["end_date"] = end_date
+    query_sql += " ORDER BY a_xr_date DESC, code"
+    rows = ch.execute(query_sql, params)
+    return {"count": len(rows), "data": rows}
+
+
+# ── 宏观数据查询 ──
+class MacroQueryRequest(BaseModel):
+    table: str
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    columns: Optional[str] = None
+
+
+@app.post("/v1/macro/query")
+def macro_query(req: MacroQueryRequest):
+    """通用宏观数据查询"""
+    table = req.table
+    cols = req.columns or "*"
+    query_sql = f"SELECT {cols} FROM {table} WHERE 1=1"
+    params = {}
+    if req.start_date:
+        query_sql += " AND stat_date >= %(start_date)s"
+        params["start_date"] = req.start_date
+    if req.end_date:
+        query_sql += " AND stat_date <= %(end_date)s"
+        params["end_date"] = req.end_date
+    rows = ch.execute(query_sql, params)
+    return {"count": len(rows), "data": rows}
 
 
 # ── 额度查询 ──

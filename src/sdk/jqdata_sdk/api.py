@@ -114,6 +114,114 @@ def get_index_stocks(code: str, date: Optional[str] = None) -> List[str]:
     return [s[0] if isinstance(s, (list, tuple)) else s for s in stocks]
 
 
+def get_index_weights(index_code: str, date: Optional[str] = None) -> pd.DataFrame:
+    """
+    获取指数成分股权重（模仿 jqdatasdk.get_index_weights）
+
+    Args:
+        index_code: JQData 指数代码，如 '000300.XSHG'
+        date: 权重日期 'YYYY-MM-DD'，默认最新
+
+    Returns:
+        DataFrame 含列: code, display_name, weight
+    """
+    client = _get_client()
+    params = {}
+    if date:
+        params["date"] = date
+    result = client.get(f"/v1/index/{index_code}/weights", params=params)
+    rows = result.get("data", [])
+    if not rows and result.get("note"):
+        print(f"⚠️  {result['note']}")
+        return pd.DataFrame()
+    cols = ["code", "display_name", "weight"]
+    df = pd.DataFrame(rows, columns=cols)
+    if not df.empty:
+        df = df.set_index("code")
+    return df
+
+
+def get_industry(
+    stock_codes: Union[str, List[str]],
+    date: Optional[str] = None,
+    industry_type: str = "sw_l1",
+) -> dict:
+    """
+    获取个股申万行业分类（模仿 jqdatasdk.get_industry）
+
+    Args:
+        stock_codes: 单只代码(str)或多只(list)
+        date: 查询日期 'YYYY-MM-DD'
+        industry_type: 行业分类标准 'sw_l1'/'sw_l2'/'sw_l3'
+
+    Returns:
+        {code: {'sw_l1': {'industry_name': str, 'industry_code': str}}}
+        模仿 jqdatasdk 的嵌套结构
+    """
+    client = _get_client()
+    codes = [stock_codes] if isinstance(stock_codes, str) else list(stock_codes)
+    codes_str = ",".join(codes)
+    params = {"codes": codes_str, "type": industry_type}
+    if date:
+        params["date"] = date
+    result = client.get("/v1/industry", params=params)
+    raw = result.get("data", {})
+    # 转换为 jqdatasdk 兼容格式
+    output = {}
+    for code, info in raw.items():
+        output[code] = {
+            industry_type: {
+                "industry_name": info.get("industry_name"),
+                "industry_code": info.get("industry_code"),
+            }
+        }
+    return output
+
+
+def get_xr_xd(
+    codes: Union[str, List[str], None] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> pd.DataFrame:
+    """
+    获取除权除息事件（分红送转）
+
+    Args:
+        codes: 单只/多只股票代码，None 表示不限制
+        start_date: 除权日起始 'YYYY-MM-DD'
+        end_date: 除权日结束 'YYYY-MM-DD'
+
+    Returns:
+        DataFrame 含列: code, company_name, a_xr_date, bonus_type,
+                       dividend_ratio, transfer_ratio, bonus_ratio_rmb,
+                       bonus_amount_rmb, a_registration_date, a_bonus_date,
+                       plan_progress, implementation_pub_date, report_date
+    """
+    client = _get_client()
+    params = {}
+    if codes:
+        code_list = [codes] if isinstance(codes, str) else list(codes)
+        params["codes"] = ",".join(code_list)
+    if start_date:
+        params["start_date"] = start_date
+    if end_date:
+        params["end_date"] = end_date
+    result = client.get("/v1/xr_xd", params=params)
+    rows = result.get("data", [])
+    if not rows:
+        return pd.DataFrame()
+    cols = ["code", "company_name", "a_xr_date", "bonus_type", "dividend_ratio",
+            "transfer_ratio", "bonus_ratio_rmb", "bonus_amount_rmb",
+            "a_registration_date", "a_bonus_date", "plan_progress",
+            "implementation_pub_date", "report_date"]
+    df = pd.DataFrame(rows, columns=cols)
+    for col in ["a_xr_date", "a_registration_date", "a_bonus_date",
+                "implementation_pub_date", "report_date"]:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce")
+    return df
+
+
 def get_query_count() -> dict:
     """查询当日调用统计"""
     client = _get_client()

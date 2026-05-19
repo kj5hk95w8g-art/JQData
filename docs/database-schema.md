@@ -344,6 +344,76 @@ PARTITION BY toYYYYMM(target_date)
 ORDER BY (data_type, target_date, worker_id);
 ```
 
+### 2.12 除权除息（STK_XR_XD）
+
+```sql
+CREATE TABLE IF NOT EXISTS stk_xr_xd (
+    id UInt64,
+    company_id UInt64,
+    company_name String,
+    code LowCardinality(String),
+    report_date Date,
+    bonus_type LowCardinality(String),
+    board_plan_pub_date Date,
+    board_plan_bonusnote String,
+    shareholders_plan_pub_date Date,
+    shareholders_plan_bonusnote String,
+    implementation_pub_date Date,
+    implementation_bonusnote String,
+    dividend_ratio Float64 COMMENT '分红比例',
+    transfer_ratio Float64 COMMENT '送转比例',
+    bonus_ratio_rmb Float64,
+    bonus_ratio_usd Float64,
+    bonus_ratio_hkd Float64,
+    bonus_amount_rmb Float64 COMMENT '分红总额',
+    a_registration_date Date COMMENT 'A股登记日',
+    a_xr_date Date COMMENT 'A股除权除息日',
+    a_bonus_date Date COMMENT 'A股派息日',
+    a_increment_listing_date Date COMMENT 'A股送转股上市日',
+    total_capital_before_transfer Float64,
+    total_capital_after_transfer Float64,
+    plan_progress LowCardinality(String) COMMENT '预案进度',
+    sync_date DateTime DEFAULT now()
+) ENGINE = MergeTree
+ORDER BY (code, report_date, implementation_pub_date)
+SETTINGS index_granularity = 8192;
+```
+
+**同步脚本:** `src/sync_stk_xr_xd.py`（全量+增量+月兜底三模式）
+
+### 2.13 行业成分（industry_stocks）
+
+```sql
+CREATE TABLE IF NOT EXISTS industry_stocks (
+    industry_code String COMMENT '申万行业代码',
+    industry_name String COMMENT '申万行业名称',
+    stock_code String COMMENT '成分股代码',
+    level String COMMENT '行业级别: sw_l1/sw_l2/sw_l3',
+    date String COMMENT '快照日期',
+    sync_date DateTime DEFAULT now()
+) ENGINE = MergeTree
+ORDER BY (industry_code, stock_code)
+SETTINGS index_granularity = 8192;
+```
+
+**同步脚本:** `src/sync_extended.py` 的 `sync_industries()`
+
+### 2.14 宏观数据（macro_bond_yield_10y）
+
+```sql
+CREATE TABLE IF NOT EXISTS macro_bond_yield_10y (
+    stat_date Date COMMENT '统计日期',
+    yield Float64 COMMENT '10年期国债收益率（%）',
+    sync_date DateTime DEFAULT now()
+) ENGINE = MergeTree
+ORDER BY stat_date
+SETTINGS index_granularity = 8192;
+```
+
+**同步脚本:** `src/sync_extended.py` 的 `sync_macro()`
+
+其他宏观表：`macro_cn_gdp`, `macro_cn_cpi`, `macro_cn_m2`, `macro_cn_pmi`（结构由 `ensure_table` 动态创建）
+
 ---
 
 ## 三、待探测/待确认
@@ -373,5 +443,5 @@ ORDER BY (data_type, target_date, worker_id);
 
 ---
 
-*最后更新：2026-05-08*  
-*版本：v1.0.0 — 基于 JQData API 实际探测结果*
+*最后更新：2026-05-19*  
+*版本：v1.1.0 — 新增 stk_xr_xd / industry_stocks / macro_bond_yield_10y 表*

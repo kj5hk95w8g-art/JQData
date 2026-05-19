@@ -207,20 +207,36 @@ def sync_concepts(ch: Client):
 def sync_macro(ch: Client):
     """同步核心宏观指标"""
     logger.info("=== 开始同步 macro ===")
-    # 核心表: GDP, CPI, M2, 社融
-    tables = [
-        ("macro_cn_gdp", "国内生产总值", "select * from macro where table_name='gdp'"),
-        ("macro_cn_cpi", "居民消费价格指数", "select * from macro where table_name='cpi'"),
-        ("macro_cn_m2", "广义货币供应量", "select * from macro where table_name='m2'"),
-        ("macro_cn_pmi", "制造业PMI", "select * from macro where table_name='pmi'"),
-    ]
     total = 0
-    for table_name, desc, _ in tables:
+
+    # ── 10年国债收益率（MAC_BOND_YIELD_10Y）──
+    logger.info("正在同步 MAC_BOND_YIELD_10Y（10年期国债收益率）...")
+    try:
+        df = jq.macro.run_query(
+            jq.query(jq.macro.MAC_BOND_YIELD_10Y).limit(50000)
+        )
+        if df is not None and not df.empty:
+            n = insert_df(ch, "macro_bond_yield_10y", df)
+            total += n
+            logger.info(f"macro_bond_yield_10y: {n} rows")
+        else:
+            logger.warning("macro_bond_yield_10y 无数据返回")
+    except Exception as e:
+        logger.error(f"macro_bond_yield_10y failed: {e}")
+
+    # ── 核心表: GDP, CPI, M2, PMI ──
+    tables = [
+        ("macro_cn_gdp", "国内生产总值"),
+        ("macro_cn_cpi", "居民消费价格指数"),
+        ("macro_cn_m2", "广义货币供应量"),
+        ("macro_cn_pmi", "制造业PMI"),
+    ]
+    for table_name, desc in tables:
         try:
-            # JQData macro 模块通过 run_query 查询
-            q = getattr(jq.macro, table_name.upper().replace("MACRO_CN_", ""), None)
+            attr_name = table_name.upper().replace("MACRO_CN_", "")
+            q = getattr(jq.macro, attr_name, None)
             if q is None:
-                logger.warning(f"macro table {table_name} not found")
+                logger.warning(f"macro table {table_name} ({attr_name}) not found in jq.macro")
                 continue
             df = jq.macro.run_query(jq.query(q).limit(10000))
             n = insert_df(ch, table_name, df)
