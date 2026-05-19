@@ -162,11 +162,11 @@ def get_index_stocks(
     trade_date: str = Query(None, description="权重日期，默认最新"),
 ):
     """获取指数成分股列表"""
-    table = "index_component"
+    table = "index_weights"
     query_sql = f"SELECT code, display_name, weight FROM {table} WHERE index_code=%(code)s"
     params = {"code": code}
     if trade_date:
-        query_sql += " AND trade_date=%(trade_date)s"
+        query_sql += " AND date=%(trade_date)s"
         params["trade_date"] = trade_date
     query_sql += " ORDER BY weight DESC"
     try:
@@ -174,7 +174,7 @@ def get_index_stocks(
         return {"code": code, "trade_date": trade_date, "count": len(rows), "data": rows}
     except Exception:
         return {"code": code, "trade_date": trade_date, "count": 0, "data": [],
-                "note": "index_component 表尚未同步数据，请先执行 sync_index_weights.py"}
+                "note": "index_weights 表无数据，请先执行 sync_index_weights.py"}
 
 
 # ── 指数成分权重 ──
@@ -184,11 +184,11 @@ def get_index_weights(
     date: str = Query(None, description="权重日期 YYYY-MM-DD"),
 ):
     """获取指数成分股权重"""
-    table = "index_component"
+    table = "index_weights"
     query_sql = f"SELECT code, display_name, weight FROM {table} WHERE index_code=%(code)s"
     params = {"code": code}
     if date:
-        query_sql += " AND trade_date=%(date)s"
+        query_sql += " AND date=%(date)s"
         params["date"] = date
     query_sql += " ORDER BY weight DESC"
     try:
@@ -196,7 +196,7 @@ def get_index_weights(
         return {"code": code, "date": date, "count": len(rows), "data": rows}
     except Exception:
         return {"code": code, "date": date, "count": 0, "data": [],
-                "note": "index_component 表尚未同步数据，请先执行 sync_index_weights.py"}
+                "note": "index_weights 表无数据，请先执行 sync_index_weights.py"}
 
 
 # ── 行业分类 ──
@@ -207,7 +207,7 @@ def get_industry(
     type: str = Query("sw_l1", description="行业分类标准：sw_l1/sw_l2/sw_l3"),
 ):
     """获取个股申万行业分类"""
-    table = "industry_stocks"
+    table = "industry_component"
     code_list = [c.strip() for c in codes.split(",")] if codes else None
     query_sql = f"SELECT stock_code, industry_code, industry_name FROM {table} WHERE level=%(type)s"
     params = {"type": type}
@@ -215,7 +215,7 @@ def get_industry(
         query_sql += " AND stock_code IN %(codes)s"
         params["codes"] = code_list
     if date:
-        query_sql += " AND date=%(date)s"
+        query_sql += " AND trade_date=%(date)s"
         params["date"] = date
     rows = ch.execute(query_sql, params)
     # 转为 {code: {industry_name, industry_code}} 格式
