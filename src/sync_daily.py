@@ -736,6 +736,15 @@ class JQDataSync:
         if len(deduped) < len(records):
             logger.warning(f"去重: {len(records)} -> {len(deduped)}")
         
+        if deduped:
+            # 删除数据库中已存在的 (code, trade_date)，避免重复
+            codes = list(set([r[0] for r in deduped]))
+            dates = list(set([str(r[1]) for r in deduped]))
+            codes_str = ",".join([f"'{c}'" for c in codes])
+            dates_str = ",".join([f"'{d}'" for d in dates])
+            self.ch.execute(f"ALTER TABLE {table} DELETE WHERE code IN ({codes_str}) AND trade_date IN ({dates_str})")
+            self._wait_for_mutations(table)
+        
         cols = (
             "code, trade_date, open, high, low, close, volume, amount, "
             "fq_factor, high_limit, low_limit, avg_price, pre_close, paused"
