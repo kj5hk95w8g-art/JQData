@@ -101,6 +101,23 @@ class JQDataSync:
         except Exception:
             quota_str = "未知"
         
+        # 各表日期字段映射（trade_date / statDate / date / report_date）
+        DATE_COL_MAP = {
+            "stock_daily_pre": "trade_date",
+            "stock_daily_post": "trade_date",
+            "index_daily": "trade_date",
+            "index_weights": "date",
+            "stk_xr_xd": "report_date",
+            "margin_stocks": "trade_date",
+            "margin_trading": "trade_date",
+            "billboard": "trade_date",
+            "stock_valuation": "trade_date",
+            "balance": "statDate",
+            "income": "statDate",
+            "cash_flow": "statDate",
+            "indicator": "statDate",
+        }
+
         # 构建表格数据
         tables_info = [
             ("股票日线(前复权)", "stock_daily_pre"),
@@ -130,7 +147,7 @@ class JQDataSync:
         for name, table in tables_info:
             try:
                 # 先检查表是否存在
-                exists = self.ch.execute(f"SELECT count() FROM system.tables WHERE database = {CH_DB} AND name = {table}")
+                exists = self.ch.execute(f"SELECT count() FROM system.tables WHERE database = '{CH_DB}' AND name = '{table}'")
                 if not exists or exists[0][0] == 0:
                     lines.append(f"| {name} | N/A | — | 未创建 |")
                     continue
@@ -140,7 +157,8 @@ class JQDataSync:
                 total = total_rows[0][0] if total_rows else 0
                 
                 # 最新日期
-                max_date_rows = self.ch.execute(f"SELECT max(trade_date) FROM {table}")
+                date_col = DATE_COL_MAP.get(table, "trade_date")
+                max_date_rows = self.ch.execute(f"SELECT max({date_col}) FROM {table}")
                 max_date = str(max_date_rows[0][0]) if max_date_rows and max_date_rows[0][0] else "N/A"
             except Exception:
                 total = 0
