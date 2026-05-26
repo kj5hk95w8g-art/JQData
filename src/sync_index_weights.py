@@ -30,7 +30,7 @@ CH_DB = os.getenv("CH_DB", "jqdata")
 SYNC_MODE = os.getenv("SYNC_MODE", "full")  # full | incremental
 TRIAL_END = date.today().isoformat()
 
-# ── 沃土全部14个基准指数 ──
+# ── 沃土全部15个基准指数 ──
 BENCHMARKS = [
     ("000300.XSHG", "沪深300"),
     ("000905.XSHG", "中证500"),

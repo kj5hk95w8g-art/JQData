@@ -18,6 +18,66 @@ app = FastAPI(
     version="2.2.0"
 )
 
+import math
+
+# 价格字段集合（需要进行复权调整的字段）
+PRICE_COLS = {"open", "high", "low", "close", "pre_close", "avg", "high_limit", "low_limit"}
+
+
+def _sanitize_for_json(rows):
+    """将 rows 中的 NaN/Inf 替换为 None，避免 JSON 序列化失败"""
+    if not rows:
+        return rows
+    cleaned = []
+    for row in rows:
+        new_row = []
+        for val in row:
+            if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+                new_row.append(None)
+            else:
+                new_row.append(val)
+        cleaned.append(tuple(new_row))
+    return cleaned
+
+
+def _apply_fq_adjustment(rows, col_names, fq):
+    """对 pre/post 表的价格字段进行复权调整。
+    
+    ClickHouse 中存储的是不复权价格，返回时乘以 factor 得到前复权/后复权价格。
+    """
+    if fq not in ("pre", "post") or "fq_factor" not in col_names:
+        return rows
+    
+    factor_idx = col_names.index("fq_factor")
+    adjusted = []
+    for row in rows:
+        factor = row[factor_idx]
+        # 处理 None/NaN factor
+        if factor is None or (isinstance(factor, float) and math.isnan(factor)):
+            factor = 1.0
+        new_row = []
+        for i, val in enumerate(row):
+            if col_names[i] in PRICE_COLS and val is not None and factor:
+                # 跳过 NaN 值
+                if isinstance(val, float) and math.isnan(val):
+                    new_row.append(None)
+                else:
+                    new_row.append(val * factor)
+            else:
+                new_row.append(val)
+        adjusted.append(tuple(new_row))
+    return adjusted
+
+
+def _remove_factor_column(rows, col_names):
+    """如果客户端没请求 fq_factor，从结果中移除该列"""
+    if "fq_factor" not in col_names:
+        return rows, col_names
+    idx = col_names.index("fq_factor")
+    new_cols = col_names[:idx] + col_names[idx+1:]
+    new_rows = [row[:idx] + row[idx+1:] for row in rows]
+    return new_rows, new_cols
+
 # ── 配置 ──
 CH_HOST = os.getenv("CH_HOST", "localhost")
 CH_DB = os.getenv("CH_DB", "jqdata")
@@ -82,10 +142,26 @@ def get_daily(
 ):
     table = f"stock_daily_{fq}"
     cols = fields or "trade_date,open,high,low,close,volume,amount"
+    
+    # 确保查询包含 fq_factor（用于复权计算）
+    query_cols = cols
+    if "fq_factor" not in query_cols:
+        query_cols += ",fq_factor"
+    
     rows = ch.execute(
-        f"SELECT {cols} FROM {table} WHERE code=%(code)s AND trade_date BETWEEN %(start)s AND %(end)s ORDER BY trade_date",
+        f"SELECT {query_cols} FROM {table} WHERE code=%(code)s AND trade_date BETWEEN %(start)s AND %(end)s ORDER BY trade_date",
         {"code": code, "start": start, "end": end},
     )
+    col_names = [c.strip() for c in query_cols.split(",")]
+    
+    # 复权调整：不复权价格 * factor = 前复权/后复权价格
+    rows = _apply_fq_adjustment(rows, col_names, fq)
+    
+    # 如果客户端没请求 fq_factor，从结果中移除
+    if "fq_factor" not in (fields or ""):
+        rows, col_names = _remove_factor_column(rows, col_names)
+    
+    rows = _sanitize_for_json(rows)
     return {"code": code, "count": len(rows), "data": rows}
 
 
@@ -103,10 +179,26 @@ def get_daily_batch(req: BatchDailyRequest):
     """批量查询多只股票日线"""
     table = f"stock_daily_{req.fq}"
     cols = req.fields or "code,trade_date,open,high,low,close,volume,amount"
+    
+    # 确保查询包含 fq_factor（用于复权计算）
+    query_cols = cols
+    if "fq_factor" not in query_cols:
+        query_cols += ",fq_factor"
+    
     rows = ch.execute(
-        f"SELECT {cols} FROM {table} WHERE code IN %(codes)s AND trade_date BETWEEN %(start)s AND %(end)s ORDER BY code, trade_date",
+        f"SELECT {query_cols} FROM {table} WHERE code IN %(codes)s AND trade_date BETWEEN %(start)s AND %(end)s ORDER BY code, trade_date",
         {"codes": req.codes, "start": req.start, "end": req.end},
     )
+    col_names = [c.strip() for c in query_cols.split(",")]
+    
+    # 复权调整：不复权价格 * factor = 前复权/后复权价格
+    rows = _apply_fq_adjustment(rows, col_names, req.fq)
+    
+    # 如果客户端没请求 fq_factor，从结果中移除
+    if "fq_factor" not in (req.fields or ""):
+        rows, col_names = _remove_factor_column(rows, col_names)
+    
+    rows = _sanitize_for_json(rows)
     return {"codes": req.codes, "count": len(rows), "data": rows}
 
 
@@ -123,6 +215,7 @@ def get_index(
         f"SELECT {cols} FROM index_daily WHERE code=%(code)s AND trade_date BETWEEN %(start)s AND %(end)s ORDER BY trade_date",
         {"code": code, "start": start, "end": end},
     )
+    rows = _sanitize_for_json(rows)
     return {"code": code, "count": len(rows), "data": rows}
 
 
@@ -140,6 +233,7 @@ def get_securities(
         params["types"] = type_list
     query += " ORDER BY code"
     rows = ch.execute(query, params)
+    rows = _sanitize_for_json(rows)
     return {"count": len(rows), "data": rows}
 
 

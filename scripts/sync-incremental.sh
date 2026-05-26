@@ -4,7 +4,7 @@
 # 触发时间：交易日 23:00
 # 额度控制：保留 2000 万条，其余 1.8 亿条用于同步
 
-set -e
+# set -e  # 移除，因为后面大量使用 || true 忽略错误
 
 PROJECT_DIR="/data/jqdata-platform"
 LOG_DIR="$PROJECT_DIR/logs"

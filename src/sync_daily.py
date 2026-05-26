@@ -17,7 +17,8 @@
   TRIAL_START          全量起始日期，默认 2020-01-01
   TRIAL_END            全量结束日期，默认今天
 """
-import os, sys, time, logging, argparse
+import os, sys, time, logging, argparse, random
+import requests
 from datetime import datetime, timedelta, date
 from typing import List, Tuple, Optional
 import pandas as pd
@@ -66,6 +67,89 @@ class JQDataSync:
         self._quota_used_today = 0
         self._quota_date = _today_str()
         self._load_quota_state()
+
+    def _send_feishu(self, title: str, content: str):
+        """发送飞书/企业微信/钉钉通知（兼容多种 webhook 格式）"""
+        webhook = os.getenv("FEISHU_WEBHOOK_URL") or os.getenv("WEBHOOK_URL")
+        if not webhook:
+            return
+        try:
+            msg = f"{title}\n{content}"
+            # 根据域名判断平台，使用对应格式
+            if "feishu" in webhook or "larksuite" in webhook:
+                payload = {"msg_type": "text", "content": {"text": msg}}
+            else:
+                # 企业微信/钉钉格式
+                payload = {"msgtype": "text", "text": {"content": msg}}
+            requests.post(webhook, json=payload, timeout=5)
+        except Exception as e:
+            logger.warning(f"飞书推送失败: {e}")
+
+    def _send_sync_report(self, mode: str = "full"):
+        """发送同步完成报告（保留原有表格样式）"""
+        webhook = os.getenv("FEISHU_WEBHOOK_URL") or os.getenv("WEBHOOK_URL")
+        if not webhook:
+            return
+        
+        from datetime import datetime
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 查询额度
+        try:
+            quota = jq.get_query_count()
+            quota_str = f"{quota['spare']:,} / {quota['total']:,}"
+        except Exception:
+            quota_str = "未知"
+        
+        # 构建表格数据
+        tables_info = [
+            ("股票日线(前复权)", "stock_daily_pre"),
+            ("股票日线(后复权)", "stock_daily_post"),
+            ("指数日线", "index_daily"),
+            ("指数成分权重", "index_weights"),
+            ("除权除息", "stk_xr_xd"),
+            ("融资融券标的", "margin_stocks"),
+            ("融资融券明细", "margin_trading"),
+            ("龙虎榜", "billboard"),
+            ("每日估值", "stock_valuation"),
+            ("资产负债表", "balance"),
+            ("利润表", "income"),
+            ("现金流量表", "cash_flow"),
+            ("财务指标", "indicator"),
+        ]
+        
+        lines = [
+            f"JQData 每日同步 {mode}完成",
+            f"服务器: D服务器 (101.132.161.52)",
+            f"时间: {now}",
+            f"额度: {quota_str}",
+            "",
+            "| 数据表 | 最新日期 | 今日同步 | 总数据量 |",
+        ]
+        
+        for name, table in tables_info:
+            try:
+                # 先检查表是否存在
+                exists = self.ch.execute(f"SELECT count() FROM system.tables WHERE database = {CH_DB} AND name = {table}")
+                if not exists or exists[0][0] == 0:
+                    lines.append(f"| {name} | N/A | — | 未创建 |")
+                    continue
+                
+                # 总数据量
+                total_rows = self.ch.execute(f"SELECT count() FROM {table}")
+                total = total_rows[0][0] if total_rows else 0
+                
+                # 最新日期
+                max_date_rows = self.ch.execute(f"SELECT max(trade_date) FROM {table}")
+                max_date = str(max_date_rows[0][0]) if max_date_rows and max_date_rows[0][0] else "N/A"
+            except Exception:
+                total = 0
+                max_date = "N/A"
+            
+            lines.append(f"| {name} | {max_date} | — | {total:,} |")
+        
+        msg = "\n".join(lines)
+        self._send_feishu(f"JQData 每日同步 {mode}完成", msg)
 
     def _auth_jq(self):
         jq.auth(JQ_USER, JQ_PASS)
@@ -238,23 +322,70 @@ class JQDataSync:
                 )
                 df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
 
+                # === factor 数据校验 ===
+                if "factor" not in df.columns:
+                    logger.error(f"Batch {batch_idx+1}: jq.get_price 返回数据缺少 factor 列，跳过")
+                    continue
+                
+                factor_values = df["factor"].dropna()
+                if len(factor_values) > 0:
+                    factor_min = factor_values.min()
+                    factor_max = factor_values.max()
+                    factor_1_count = (factor_values == 1.0).sum()
+                    factor_1_ratio = factor_1_count / len(factor_values)
+                    logger.info(
+                        f"Batch {batch_idx+1}: factor分布 "
+                        f"min={factor_min:.6f}, max={factor_max:.6f}, "
+                        f"factor=1.0: {factor_1_count}/{len(factor_values)} ({factor_1_ratio:.2%})"
+                    )
+                    # 全部 factor=1.0 时抽查验证
+                    if factor_1_ratio == 1.0:
+                        sample_codes = df["code"].dropna().unique()
+                        if len(sample_codes) > 0:
+                            sample_code = random.choice(sample_codes)
+                            logger.warning(
+                                f"Batch {batch_idx+1}: 全部 factor=1.0，抽查 {sample_code} 验证..."
+                            )
+                            try:
+                                check_df = jq.get_price(
+                                    [sample_code],
+                                    start_date=df["trade_date"].min(),
+                                    end_date=df["trade_date"].max(),
+                                    frequency="daily",
+                                    fields=["open", "close", "high", "low", "volume", "money", "factor"],
+                                    skip_paused=False,
+                                    fq=fq,
+                                    panel=False,
+                                )
+                                if check_df is not None and "factor" in check_df.columns:
+                                    check_factors = check_df["factor"].dropna()
+                                    if len(check_factors) > 0 and check_factors.min() < 1.0:
+                                        logger.error(
+                                            f"数据异常！JQ云 {sample_code} factor={check_factors.min():.6f}，"
+                                            f"但本批次全部为 1.0。跳过本批次。"
+                                        )
+                                        continue
+                            except Exception as e:
+                                logger.error(f"抽查验证失败: {e}")
+
                 records = []
                 for _, row in df.iterrows():
+                    factor_val = float(row.get("factor", 1) or 1) or 1.0
                     records.append(
                         (
                             row["code"],
                             row["trade_date"],
-                            float(row.get("open", 0) or 0),
-                            float(row.get("high", 0) or 0),
-                            float(row.get("low", 0) or 0),
-                            float(row.get("close", 0) or 0),
+                            float(row.get("open", 0) or 0) / factor_val,
+                            float(row.get("high", 0) or 0) / factor_val,
+                            float(row.get("low", 0) or 0) / factor_val,
+                            float(row.get("close", 0) or 0) / factor_val,
                             int(row.get("volume", 0) or 0) if pd.notna(row.get("volume", 0)) else 0,
                             float(row.get("money", 0) or 0),
-                            float(row.get("factor", 1) or 1),
-                            float(row.get("high_limit", 0) or 0),
-                            float(row.get("low_limit", 0) or 0),
-                            float(row.get("avg", 0) or 0),
-                            float(row.get("pre_close", 0) or 0),
+                            factor_val,
+                            float(row.get("high_limit", 0) or 0) / factor_val,
+                            float(row.get("low_limit", 0) or 0) / factor_val,
+                            float(row.get("avg", 0) or 0) / factor_val,
+                            float(row.get("pre_close", 0) or 0) / factor_val,
                             int(row["paused"]) if pd.notna(row.get("paused")) else 0,
                         )
                     )
@@ -421,21 +552,22 @@ class JQDataSync:
 
                 records = []
                 for _, row in df.iterrows():
+                    factor_val = float(row.get("factor", 1) or 1) or 1.0
                     records.append(
                         (
                             row["code"],
                             row["trade_date"],
-                            float(row.get("open", 0) or 0),
-                            float(row.get("high", 0) or 0),
-                            float(row.get("low", 0) or 0),
-                            float(row.get("close", 0) or 0),
+                            float(row.get("open", 0) or 0) / factor_val,
+                            float(row.get("high", 0) or 0) / factor_val,
+                            float(row.get("low", 0) or 0) / factor_val,
+                            float(row.get("close", 0) or 0) / factor_val,
                             int(row.get("volume", 0) or 0) if pd.notna(row.get("volume", 0)) else 0,
                             float(row.get("money", 0) or 0),
-                            float(row.get("factor", 1) or 1),
-                            float(row.get("high_limit", 0) or 0),
-                            float(row.get("low_limit", 0) or 0),
-                            float(row.get("avg", 0) or 0),
-                            float(row.get("pre_close", 0) or 0),
+                            factor_val,
+                            float(row.get("high_limit", 0) or 0) / factor_val,
+                            float(row.get("low_limit", 0) or 0) / factor_val,
+                            float(row.get("avg", 0) or 0) / factor_val,
+                            float(row.get("pre_close", 0) or 0) / factor_val,
                             int(row["paused"]) if pd.notna(row.get("paused")) else 0,
                         )
                     )
@@ -577,12 +709,21 @@ class JQDataSync:
         return self.sync_index_daily(start_date=start, end_date=end)
 
     def _insert_batch(self, table: str, records: List[Tuple]):
+        # 按 (code, trade_date) 去重，保留最后一条
+        seen = {}
+        for r in records:
+            key = (r[0], r[1])  # code, trade_date
+            seen[key] = r
+        deduped = list(seen.values())
+        if len(deduped) < len(records):
+            logger.warning(f"去重: {len(records)} -> {len(deduped)}")
+        
         cols = (
             "code, trade_date, open, high, low, close, volume, amount, "
             "fq_factor, high_limit, low_limit, avg_price, pre_close, paused"
         )
         sql = f"INSERT INTO {table} ({cols}) VALUES"
-        self.ch.execute(sql, records)
+        self.ch.execute(sql, deduped)
 
 
 def main():
@@ -637,8 +778,19 @@ def main():
         if args.table in ("index", "all"):
             sync.sync_index_daily()
 
+    sync._send_sync_report(mode="full")
     logger.info("=== 同步任务结束 ===")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.error(f"同步任务异常退出: {e}")
+        sync = JQDataSync()
+        sync._send_feishu(
+            "JQData 同步异常",
+            f"异常信息: {e}\n"
+            f"服务器: D服务器 (101.132.161.52)",
+        )
+        raise
