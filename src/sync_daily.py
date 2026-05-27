@@ -17,7 +17,8 @@
   TRIAL_START          全量起始日期，默认 2020-01-01
   TRIAL_END            全量结束日期，默认今天
 """
-import os, sys, time, logging, argparse
+import os, sys, time, logging, argparse, random
+import requests
 from datetime import datetime, timedelta, date
 from typing import List, Tuple, Optional
 import pandas as pd
@@ -66,6 +67,116 @@ class JQDataSync:
         self._quota_used_today = 0
         self._quota_date = _today_str()
         self._load_quota_state()
+
+    def _send_feishu(self, title: str, content: str):
+        """发送飞书/企业微信/钉钉通知（兼容多种 webhook 格式）"""
+        webhook = os.getenv("FEISHU_WEBHOOK_URL") or os.getenv("WEBHOOK_URL")
+        if not webhook:
+            return
+        try:
+            msg = f"{title}\n{content}"
+            # 根据域名判断平台，使用对应格式
+            if "feishu" in webhook or "larksuite" in webhook:
+                payload = {"msg_type": "text", "content": {"text": msg}}
+            else:
+                # 企业微信/钉钉格式
+                payload = {"msgtype": "text", "text": {"content": msg}}
+            requests.post(webhook, json=payload, timeout=5)
+        except Exception as e:
+            logger.warning(f"飞书推送失败: {e}")
+
+    def _send_sync_report(self, mode: str = "full"):
+        """发送同步完成报告（保留原有表格样式）"""
+        webhook = os.getenv("FEISHU_WEBHOOK_URL") or os.getenv("WEBHOOK_URL")
+        if not webhook:
+            return
+        
+        from datetime import datetime
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 查询额度
+        try:
+            quota = jq.get_query_count()
+            quota_str = f"{quota['spare']:,} / {quota['total']:,}"
+        except Exception:
+            quota_str = "未知"
+        
+        # 各表日期字段映射（trade_date / statDate / date / report_date）
+        DATE_COL_MAP = {
+            "stock_daily_pre": "trade_date",
+            "stock_daily_post": "trade_date",
+            "index_daily": "trade_date",
+            "index_weights": "date",
+            "stk_xr_xd": "report_date",
+            "margin_stocks": "trade_date",
+            "margin_trading": "trade_date",
+            "billboard": "trade_date",
+            "stock_valuation": "trade_date",
+            "balance": "statDate",
+            "income": "statDate",
+            "cash_flow": "statDate",
+            "indicator": "statDate",
+        }
+
+        # 构建表格数据
+        tables_info = [
+            ("股票日线(前复权)", "stock_daily_pre"),
+            ("股票日线(后复权)", "stock_daily_post"),
+            ("指数日线", "index_daily"),
+            ("指数成分权重", "index_weights"),
+            ("除权除息", "stk_xr_xd"),
+            ("融资融券标的", "margin_stocks"),
+            ("融资融券明细", "margin_trading"),
+            ("龙虎榜", "billboard"),
+            ("每日估值", "stock_valuation"),
+            ("资产负债表", "balance"),
+            ("利润表", "income"),
+            ("现金流量表", "cash_flow"),
+            ("财务指标", "indicator"),
+        ]
+        
+        lines = [
+            f"JQData 每日同步 {mode}完成",
+            f"服务器: D服务器 (101.132.161.52)",
+            f"时间: {now}",
+            f"额度: {quota_str}",
+            "",
+            "| 数据表 | 最新日期 | 今日同步 | 总数据量 |",
+        ]
+        
+        for name, table in tables_info:
+            try:
+                # 先检查表是否存在
+                exists = self.ch.execute(f"SELECT count() FROM system.tables WHERE database = '{CH_DB}' AND name = '{table}'")
+                if not exists or exists[0][0] == 0:
+                    lines.append(f"| {name} | N/A | — | 未创建 |")
+                    continue
+                
+                # 总数据量
+                total_rows = self.ch.execute(f"SELECT count() FROM {table}")
+                total = total_rows[0][0] if total_rows else 0
+                
+                # 最新日期
+                date_col = DATE_COL_MAP.get(table, "trade_date")
+                max_date_rows = self.ch.execute(f"SELECT max({date_col}) FROM {table}")
+                max_date = str(max_date_rows[0][0]) if max_date_rows and max_date_rows[0][0] else "N/A"
+            except Exception:
+                total = 0
+                max_date = "N/A"
+            
+            # 今日同步量（不是所有表都有 sync_date，需要兼容）
+            today_sync = "—"
+            try:
+                today_rows = self.ch.execute(f"SELECT count() FROM {table} WHERE sync_date >= today()")
+                if today_rows and today_rows[0][0] > 0:
+                    today_sync = f"{today_rows[0][0]:,}"
+            except Exception:
+                pass  # 表无 sync_date 字段，保持 "—"
+            
+            lines.append(f"| {name} | {max_date} | {today_sync} | {total:,} |")
+        
+        msg = "\n".join(lines)
+        self._send_feishu(f"JQData 每日同步 {mode}完成", msg)
 
     def _auth_jq(self):
         jq.auth(JQ_USER, JQ_PASS)
@@ -238,23 +349,70 @@ class JQDataSync:
                 )
                 df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
 
+                # === factor 数据校验 ===
+                if "factor" not in df.columns:
+                    logger.error(f"Batch {batch_idx+1}: jq.get_price 返回数据缺少 factor 列，跳过")
+                    continue
+                
+                factor_values = df["factor"].dropna()
+                if len(factor_values) > 0:
+                    factor_min = factor_values.min()
+                    factor_max = factor_values.max()
+                    factor_1_count = (factor_values == 1.0).sum()
+                    factor_1_ratio = factor_1_count / len(factor_values)
+                    logger.info(
+                        f"Batch {batch_idx+1}: factor分布 "
+                        f"min={factor_min:.6f}, max={factor_max:.6f}, "
+                        f"factor=1.0: {factor_1_count}/{len(factor_values)} ({factor_1_ratio:.2%})"
+                    )
+                    # 全部 factor=1.0 时抽查验证
+                    if factor_1_ratio == 1.0:
+                        sample_codes = df["code"].dropna().unique()
+                        if len(sample_codes) > 0:
+                            sample_code = random.choice(sample_codes)
+                            logger.warning(
+                                f"Batch {batch_idx+1}: 全部 factor=1.0，抽查 {sample_code} 验证..."
+                            )
+                            try:
+                                check_df = jq.get_price(
+                                    [sample_code],
+                                    start_date=df["trade_date"].min(),
+                                    end_date=df["trade_date"].max(),
+                                    frequency="daily",
+                                    fields=["open", "close", "high", "low", "volume", "money", "factor"],
+                                    skip_paused=False,
+                                    fq=fq,
+                                    panel=False,
+                                )
+                                if check_df is not None and "factor" in check_df.columns:
+                                    check_factors = check_df["factor"].dropna()
+                                    if len(check_factors) > 0 and check_factors.min() < 1.0:
+                                        logger.error(
+                                            f"数据异常！JQ云 {sample_code} factor={check_factors.min():.6f}，"
+                                            f"但本批次全部为 1.0。跳过本批次。"
+                                        )
+                                        continue
+                            except Exception as e:
+                                logger.error(f"抽查验证失败: {e}")
+
                 records = []
                 for _, row in df.iterrows():
+                    factor_val = float(row.get("factor", 1) or 1) or 1.0
                     records.append(
                         (
                             row["code"],
                             row["trade_date"],
-                            float(row.get("open", 0) or 0),
-                            float(row.get("high", 0) or 0),
-                            float(row.get("low", 0) or 0),
-                            float(row.get("close", 0) or 0),
+                            float(row.get("open", 0) or 0) / factor_val,
+                            float(row.get("high", 0) or 0) / factor_val,
+                            float(row.get("low", 0) or 0) / factor_val,
+                            float(row.get("close", 0) or 0) / factor_val,
                             int(row.get("volume", 0) or 0) if pd.notna(row.get("volume", 0)) else 0,
                             float(row.get("money", 0) or 0),
-                            float(row.get("factor", 1) or 1),
-                            float(row.get("high_limit", 0) or 0),
-                            float(row.get("low_limit", 0) or 0),
-                            float(row.get("avg", 0) or 0),
-                            float(row.get("pre_close", 0) or 0),
+                            factor_val,
+                            float(row.get("high_limit", 0) or 0) / factor_val,
+                            float(row.get("low_limit", 0) or 0) / factor_val,
+                            float(row.get("avg", 0) or 0) / factor_val,
+                            float(row.get("pre_close", 0) or 0) / factor_val,
                             int(row["paused"]) if pd.notna(row.get("paused")) else 0,
                         )
                     )
@@ -294,181 +452,9 @@ class JQDataSync:
             logger.warning(f"查询 {table} 最大日期失败: {e}")
         return None
 
-    def _get_codes_with_new_xr_xd(self, fq: str) -> List[str]:
-        """检测最近 30 天内是否有新的除权除息事件，返回受影响的 JQ 代码列表
-
-        策略：
-        查询 stk_xr_xd 中最近 30 天内已实施的除权除息记录，
-        不依赖 checkpoint（checkpoint 推进后检测不到早于 checkpoint 的除权日）。
-        """
-        # 只检测已实施的除权除息（plan_progress = '实施方案'）
-        try:
-            rows = self.ch.execute(
-                """
-                SELECT DISTINCT code FROM stk_xr_xd
-                WHERE plan_progress = '实施方案'
-                  AND a_xr_date >= today() - 30
-                  AND a_xr_date <= today()
-                """,
-            )
-            codes = [r[0] for r in rows if r[0]]
-            if codes:
-                logger.info(f"检测到 {len(codes)} 只股票在最近 30 天内有除权除息: {codes}")
-            return codes
-        except Exception as e:
-            logger.warning(f"查询 stk_xr_xd 失败: {e}")
-            return []
-
-    def _delete_stock_history(self, table: str, code: str) -> str:
-        """删除 ClickHouse 中指定股票的所有历史数据，返回 mutation_id
-
-        ClickHouse 的 ALTER TABLE DELETE 是异步 mutation，
-        删除后必须等待完成才能插入新数据。
-        """
-        # 生成一个标识用的 mutation 条件字符串（用于后续轮询）
-        try:
-            # ClickHouse ALTER TABLE DELETE 不支持参数化，直接拼接（code 来自内部查询，安全）
-            self.ch.execute(f"ALTER TABLE {table} DELETE WHERE code = '{code}'")
-            logger.info(f"已提交删除 {table} 中 {code} 的历史数据")
-            return code  # 用 code 作为标识，轮询时匹配
-        except Exception as e:
-            logger.error(f"删除 {table} 中 {code} 失败: {e}")
-            raise
-
-    def _wait_for_mutation(self, table: str, code: str, timeout: int = 300) -> bool:
-        """轮询等待 ClickHouse mutation 完成
-
-        Args:
-            table: 表名
-            code: 股票代码（用于匹配 mutation 条件）
-            timeout: 最大等待秒数
-
-        Returns:
-            True: mutation 已完成
-            False: 超时
-        """
-        import time
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            try:
-                rows = self.ch.execute(
-                    f"""
-                    SELECT mutation_id, is_done
-                    FROM system.mutations
-                    WHERE database = '{CH_DB}' AND table = '{table}'
-                      AND command LIKE '%DELETE WHERE code = \\'{code}\\'%'
-                    ORDER BY create_time DESC
-                    LIMIT 1
-                    """
-                )
-                if rows and rows[0][1]:  # is_done = 1
-                    logger.info(f"Mutation 完成: {table} {code}")
-                    return True
-            except Exception as e:
-                logger.warning(f"查询 mutation 状态失败: {e}")
-            time.sleep(1)
-        logger.warning(f"Mutation 等待超时: {table} {code} (>{timeout}s)")
-        return False
-
-    def _resync_affected_codes(self, fq: str, codes: List[str]) -> int:
-        """对受除权除息影响的股票：删除历史数据 → 等待 mutation → 全量重新同步
-
-        Returns:
-            同步的总行数
-        """
-        table = f"stock_daily_{fq}"
-        total = 0
-        for code in codes:
-            logger.info(f"开始重跑 {code} 的历史数据（{fq}）...")
-            try:
-                self._delete_stock_history(table, code)
-                if not self._wait_for_mutation(table, code):
-                    logger.error(f"删除 {code} 历史数据超时，跳过重跑")
-                    continue
-
-                # 全量重新拉取该股票的历史数据
-                # 从 2020-01-01 到今天，确保覆盖所有历史
-                df = jq.get_price(
-                    [code],
-                    start_date=TRIAL_START,
-                    end_date=TRIAL_END,
-                    frequency="daily",
-                    fields=["open", "close", "high", "low", "volume", "money", "factor",
-                            "high_limit", "low_limit", "avg", "pre_close", "paused"],
-                    skip_paused=False,
-                    fq=fq,
-                    panel=False,
-                )
-                if df is None or df.empty:
-                    logger.warning(f"{code} 无数据")
-                    continue
-
-                df = df.reset_index()
-                code_col = next(
-                    (c for c in df.columns if c in ("code", "security", "level_0")),
-                    None,
-                )
-                date_col = next(
-                    (c for c in df.columns if c in ("time", "date", "trade_date", "level_1")),
-                    None,
-                )
-                if code_col is None or date_col is None:
-                    logger.warning(f"{code} 未知列: {df.columns.tolist()}")
-                    continue
-
-                df.rename(columns={code_col: "code", date_col: "trade_date"}, inplace=True)
-                df["trade_date"] = pd.to_datetime(df["trade_date"]).dt.date
-
-                records = []
-                for _, row in df.iterrows():
-                    records.append(
-                        (
-                            row["code"],
-                            row["trade_date"],
-                            float(row.get("open", 0) or 0),
-                            float(row.get("high", 0) or 0),
-                            float(row.get("low", 0) or 0),
-                            float(row.get("close", 0) or 0),
-                            int(row.get("volume", 0) or 0) if pd.notna(row.get("volume", 0)) else 0,
-                            float(row.get("money", 0) or 0),
-                            float(row.get("factor", 1) or 1),
-                            float(row.get("high_limit", 0) or 0),
-                            float(row.get("low_limit", 0) or 0),
-                            float(row.get("avg", 0) or 0),
-                            float(row.get("pre_close", 0) or 0),
-                            int(row["paused"]) if pd.notna(row.get("paused")) else 0,
-                        )
-                    )
-                    if len(records) >= INSERT_BATCH:
-                        self._insert_batch(table, records)
-                        total += len(records)
-                        records = []
-                if records:
-                    self._insert_batch(table, records)
-                    total += len(records)
-
-                self._add_quota(len(df))
-                logger.info(f"{code} 重跑完成: {len(df)} 行")
-            except Exception as e:
-                logger.error(f"重跑 {code} 失败: {e}")
-        return total
-
     def sync_stock_daily_incremental(self, fq: str = "pre") -> int:
-        """增量同步：从 checkpoint 的次日到昨天
-
-        前置检测：
-        1. 查询 stk_xr_xd，找出最近 30 天内已实施的除权除息股票
-        2. 对这些股票：删除历史数据 → 等待 mutation → 全量重新同步
-        3. 然后再执行正常的增量同步
-        """
+        """增量同步：从 checkpoint 的次日到今天"""
         table = f"stock_daily_{fq}"
-
-        # === 前置检测：除权除息导致的重跑 ===
-        affected_codes = self._get_codes_with_new_xr_xd(fq)
-        if affected_codes:
-            logger.info(f"检测到 {len(affected_codes)} 只股票需要重跑历史数据（除权除息）")
-            resynced = self._resync_affected_codes(fq, affected_codes)
-            logger.info(f"重跑完成: {resynced} 行")
 
         # === 正常的增量同步 ===
         checkpoint = self._get_checkpoint(table)
@@ -577,12 +563,30 @@ class JQDataSync:
         return self.sync_index_daily(start_date=start, end_date=end)
 
     def _insert_batch(self, table: str, records: List[Tuple]):
+        # 按 (code, trade_date) 去重，保留最后一条
+        seen = {}
+        for r in records:
+            key = (r[0], r[1])  # code, trade_date
+            seen[key] = r
+        deduped = list(seen.values())
+        if len(deduped) < len(records):
+            logger.warning(f"去重: {len(records)} -> {len(deduped)}")
+        
+        if deduped:
+            # 删除数据库中已存在的 (code, trade_date)，避免重复
+            codes = list(set([r[0] for r in deduped]))
+            dates = list(set([str(r[1]) for r in deduped]))
+            codes_str = ",".join([f"'{c}'" for c in codes])
+            dates_str = ",".join([f"'{d}'" for d in dates])
+            self.ch.execute(f"ALTER TABLE {table} DELETE WHERE code IN ({codes_str}) AND trade_date IN ({dates_str})")
+            self._wait_for_mutations(table)
+        
         cols = (
             "code, trade_date, open, high, low, close, volume, amount, "
             "fq_factor, high_limit, low_limit, avg_price, pre_close, paused"
         )
         sql = f"INSERT INTO {table} ({cols}) VALUES"
-        self.ch.execute(sql, records)
+        self.ch.execute(sql, deduped)
 
 
 def main():
@@ -637,8 +641,19 @@ def main():
         if args.table in ("index", "all"):
             sync.sync_index_daily()
 
+    sync._send_sync_report(mode="full")
     logger.info("=== 同步任务结束 ===")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logger.error(f"同步任务异常退出: {e}")
+        sync = JQDataSync()
+        sync._send_feishu(
+            "JQData 同步异常",
+            f"异常信息: {e}\n"
+            f"服务器: D服务器 (101.132.161.52)",
+        )
+        raise
