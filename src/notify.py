@@ -51,6 +51,9 @@ TABLES = [
 
 def get_quota() -> str:
     """获取今日额度使用情况"""
+    limit = os.getenv("DAILY_QUOTA_LIMIT", "200000000")
+    total = "?"
+
     # 方法1：redis-cli（宿主机直连）
     try:
         used = subprocess.check_output(
@@ -58,8 +61,13 @@ def get_quota() -> str:
             text=True, timeout=5,
         ).strip()
         if used and used != "(nil)":
-            limit = os.getenv("DAILY_QUOTA_LIMIT", "200000000")
-            return f"{int(used):,} / {int(limit):,}"
+            if jq:
+                try:
+                    q = jq.get_query_count()
+                    total = str(q.get("total", "?"))
+                except Exception:
+                    pass
+            return f"今日已用: {int(used):,}（上限 {int(limit)//10000}万，JQ总额 {_fmt_num(total)}）"
     except Exception:
         pass
 
@@ -71,19 +79,31 @@ def get_quota() -> str:
                       db=0, decode_responses=True, socket_connect_timeout=3)
         used = r.get("jqdata_sync:quota_used_today")
         if used:
-            limit = os.getenv("DAILY_QUOTA_LIMIT", "200000000")
-            return f"{int(used):,} / {int(limit):,}"
+            if jq:
+                try:
+                    q = jq.get_query_count()
+                    total = str(q.get("total", "?"))
+                except Exception:
+                    pass
+            return f"今日已用: {int(used):,}（上限 {int(limit)//10000}万，JQ总额 {_fmt_num(total)}）"
     except Exception:
         pass
 
-    # 方法3：JQData API（兜底）
-    if jq:
-        try:
-            q = jq.get_query_count()
-            return f"{q.get('spare', 0):,} / {q.get('total', '?'):,}"
-        except Exception:
-            pass
     return "未知"
+
+
+def _fmt_num(val) -> str:
+    """大数字格式化: 200000000 → 2亿"""
+    try:
+        n = int(float(str(val)))
+        if n >= 100_000_000:
+            return f"{n // 100_000_000}亿"
+        elif n >= 10_000:
+            return f"{n // 10_000}万"
+        else:
+            return f"{n:,}"
+    except Exception:
+        return str(val)
 
 
 def get_last_trade_day() -> Optional[date]:
