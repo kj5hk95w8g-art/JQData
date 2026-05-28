@@ -196,10 +196,10 @@ echo "[$(date)] 执行 stk_xr_xd 增量同步" >> "$LOG_FILE"
 run_sync "除权除息" env SYNC_MODE=incremental $SYNC_CMD src/sync_stk_xr_xd.py || true
 
 echo "[$(date)] 执行 extended 增量同步" >> "$LOG_FILE"
-run_sync "融资融券/龙虎榜" $SYNC_CMD src/sync_extended.py --incremental --days 3 || true
+run_sync "融资融券/龙虎榜" $SYNC_CMD src/sync_extended.py --incremental --days 7 || true
 
 echo "[$(date)] 执行 fundamentals 增量同步" >> "$LOG_FILE"
-run_sync "估值/财务" $SYNC_CMD src/sync_fundamentals.py --incremental --days 3 || true
+run_sync "估值/财务" $SYNC_CMD src/sync_fundamentals.py --incremental --days 7 || true
 
 # ── 额度报告 ──
 QUOTA_USED=$(redis-cli GET jqdata_sync:quota_used_today 2>/dev/null || echo "0")
