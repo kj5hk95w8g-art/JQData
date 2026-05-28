@@ -86,7 +86,7 @@ def sync_full(ch: Client):
         logger.info(f"正在同步 {name} ({jq_code})...")
         idx_total = 0
         for d in trade_days:
-            d_str = d.isoformat() if hasattr(d, "isoformat") else str(d)[:10]
+            d_str = d.strftime('%Y-%m-%d') if hasattr(d, 'strftime') else str(d)[:10]
             try:
                 df = jq.get_index_weights(jq_code, date=d_str)
                 if df is None or df.empty:
@@ -135,7 +135,7 @@ def sync_incremental(ch: Client):
     for jq_code, name in BENCHMARKS:
         logger.info(f"正在增量同步 {name} ({jq_code})...")
         for d in trade_days:
-            d_str = d.isoformat() if hasattr(d, "isoformat") else str(d)[:10]
+            d_str = d.strftime('%Y-%m-%d') if hasattr(d, 'strftime') else str(d)[:10]
             try:
                 df = jq.get_index_weights(jq_code, date=d_str)
                 if df is None or df.empty:
@@ -145,6 +145,8 @@ def sync_incremental(ch: Client):
                 df = df.rename(columns={code_col: "code"})
                 df["index_code"] = jq_code
                 df["index_name"] = name
+                if "date" in df.columns:
+                    df["date"] = df["date"].astype(str)
                 cols = ["code", "date", "weight", "display_name", "index_code", "index_name"]
                 cols = [c for c in cols if c in df.columns]
                 records = [tuple(row) for row in df[cols].values]

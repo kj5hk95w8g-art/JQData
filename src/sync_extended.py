@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """JQData 特色数据 + 行业概念 + 宏观数据同步 -> ClickHouse
 
-P1 特色: mtss, billboard_list, locked_shares, margin_stocks
-P2 分类: industries, concepts
-P3 宏观: 核心宏观指标
+用法:
+    # 全量同步（默认）
+    JQ_USER=xxx JQ_PASS=xxx python3 src/sync_extended.py
+
+    # 增量同步（最近 N 天，高频数据）
+    JQ_USER=xxx JQ_PASS=xxx python3 src/sync_extended.py --incremental --days 3
 """
-import os, sys, time, logging
+import os, sys, time, logging, argparse
 from datetime import date, timedelta
 import pandas as pd
 from clickhouse_driver import Client
@@ -42,12 +45,32 @@ def insert_df(ch: Client, table: str, df: pd.DataFrame):
     if "id" in df.columns: df = df.drop(columns=["id"])
     df = df.where(pd.notna(df), None)
     df = df.rename(columns={c: _clean_col(c) for c in df.columns})
-    # ClickHouse 不支持 pandas Timestamp，转换为字符串
+    # 查询 ClickHouse 表结构，确定各列类型
+    ch_types = {}
+    try:
+        rows = ch.execute(f"DESCRIBE TABLE {table}")
+        for row in rows:
+            col_name = row[0]
+            col_type = row[1]
+            ch_types[col_name] = col_type
+    except Exception:
+        pass
     for c in df.columns:
         if pd.api.types.is_datetime64_any_dtype(df[c]):
             df[c] = df[c].astype(str)
+        elif df[c].dtype == object:
+            # 根据 ClickHouse 列类型决定 datetime.date 的处理方式
+            ch_type = ch_types.get(c, 'String')
+            if 'Date' in ch_type and 'DateTime' not in ch_type:
+                # Date 类型保持 datetime.date 对象
+                pass
+            else:
+                # String 等其他类型：datetime.date -> str
+                if df[c].apply(lambda x: isinstance(x, date)).any():
+                    df[c] = df[c].astype(str)
+            # ClickHouse driver 0.2.10 字符串列不支持 None，替换为空字符串
+            df[c] = df[c].fillna('')
     cols = [c for c in df.columns]
-    # 自动推断 ORDER BY
     if "code" in cols and "day" in cols:
         order_by = "(code, day)"
     elif "code" in cols and "date" in cols:
@@ -67,16 +90,27 @@ def insert_df(ch: Client, table: str, df: pd.DataFrame):
 
 # ── P1: 特色数据 ──
 
-def sync_mtss(ch: Client):
+def sync_mtss(ch: Client, days: int = None):
     """融资融券历史数据（批量查询）"""
-    logger.info("=== 开始同步 mtss ===")
+    logger.info(f"=== 开始同步 mtss {'(增量 '+str(days)+'天)' if days else '(全量)'} ===")
     stocks = jq.get_all_securities(types=["stock"]).index.tolist()
     batch_size = 200
     total = 0
+
+    if days:
+        end_date = TRIAL_END
+        start_date = (date.today() - timedelta(days=days)).isoformat()
+    else:
+        end_date = TRIAL_END
+        start_date = None
+
     for i in range(0, len(stocks), batch_size):
         batch = stocks[i:i+batch_size]
         try:
-            df = jq.get_mtss(batch, count=10000, end_date=TRIAL_END)
+            if start_date:
+                df = jq.get_mtss(batch, start_date=start_date, end_date=end_date)
+            else:
+                df = jq.get_mtss(batch, count=10000, end_date=end_date)
             n = insert_df(ch, "mtss", df)
             total += n
             logger.info(f"mtss batch {i//batch_size+1}/{(len(stocks)-1)//batch_size+1}: {n} rows, total={total}")
@@ -86,36 +120,58 @@ def sync_mtss(ch: Client):
     logger.info(f"mtss completed: {total} rows")
     return total
 
-def sync_billboard(ch: Client):
-    """龙虎榜数据（按月分段查询）"""
-    logger.info("=== 开始同步 billboard_list ===")
-    # 按月分段: 2020-01 到 2026-05
-    start = date(2020, 1, 1)
-    end = date.today()
-    total = 0
-    cur = start
-    while cur <= end:
-        seg_end = min(cur + timedelta(days=30), end)
+def sync_billboard(ch: Client, days: int = None):
+    """龙虎榜数据（按月分段查询 / 增量模式）"""
+    if days:
+        logger.info(f"=== 开始同步 billboard_list (增量 {days} 天) ===")
+        start = date.today() - timedelta(days=days)
+        end = date.today()
+        total = 0
         try:
-            df = jq.get_billboard_list(start_date=cur.isoformat(), end_date=seg_end.isoformat())
+            df = jq.get_billboard_list(start_date=start.isoformat(), end_date=end.isoformat())
             n = insert_df(ch, "billboard_list", df)
             total += n
-            logger.info(f"billboard {cur}~{seg_end}: {n} rows, total={total}")
+            logger.info(f"billboard {start}~{end}: {n} rows")
         except Exception as e:
-            logger.error(f"billboard {cur}~{seg_end} failed: {e}")
-        cur = seg_end + timedelta(days=1)
-        time.sleep(0.3)
-    logger.info(f"billboard completed: {total} rows")
-    return total
+            logger.error(f"billboard failed: {e}")
+        logger.info(f"billboard completed: {total} rows")
+        return total
+    else:
+        logger.info("=== 开始同步 billboard_list (全量) ===")
+        start = date(2020, 1, 1)
+        end = date.today()
+        total = 0
+        cur = start
+        while cur <= end:
+            seg_end = min(cur + timedelta(days=30), end)
+            try:
+                df = jq.get_billboard_list(start_date=cur.isoformat(), end_date=seg_end.isoformat())
+                n = insert_df(ch, "billboard_list", df)
+                total += n
+                logger.info(f"billboard {cur}~{seg_end}: {n} rows, total={total}")
+            except Exception as e:
+                logger.error(f"billboard {cur}~{seg_end} failed: {e}")
+            cur = seg_end + timedelta(days=1)
+            time.sleep(0.3)
+        logger.info(f"billboard completed: {total} rows")
+        return total
 
-def sync_locked_shares(ch: Client):
+def sync_locked_shares(ch: Client, days: int = None):
     """限售股解禁（逐只查询）"""
-    logger.info("=== 开始同步 locked_shares ===")
+    logger.info(f"=== 开始同步 locked_shares {'(增量 '+str(days)+'天)' if days else '(全量)'} ===")
     stocks = jq.get_all_securities(types=["stock"]).index.tolist()
     total = 0
+
+    if days:
+        start_date = (date.today() - timedelta(days=days)).isoformat()
+        end_date = TRIAL_END
+    else:
+        start_date = TRIAL_START
+        end_date = TRIAL_END
+
     for idx, code in enumerate(stocks):
         try:
-            df = jq.get_locked_shares(code, start_date=TRIAL_START, end_date=TRIAL_END)
+            df = jq.get_locked_shares(code, start_date=start_date, end_date=end_date)
             n = insert_df(ch, "locked_shares", df)
             total += n
             if (idx + 1) % 500 == 0:
@@ -126,27 +182,35 @@ def sync_locked_shares(ch: Client):
     logger.info(f"locked_shares completed: {total} rows")
     return total
 
-def sync_margin_stocks(ch: Client):
+def sync_margin_stocks(ch: Client, days: int = None):
     """融资/融券标的列表（每日）"""
-    logger.info("=== 开始同步 margin_stocks ===")
-    trade_days = jq.get_trade_days(TRIAL_START, TRIAL_END)
+    logger.info(f"=== 开始同步 margin_stocks {'(增量 '+str(days)+'天)' if days else '(全量)'} ===")
+
+    if days:
+        # 增量：只查最近 N 个交易日
+        end = date.today()
+        start = end - timedelta(days=days+5)  # 多查几天确保覆盖交易日
+        trade_days = jq.get_trade_days(start.isoformat(), end.isoformat())
+        # 只取最后 days 个交易日
+        trade_days = trade_days[-days:] if len(trade_days) > days else trade_days
+    else:
+        trade_days = jq.get_trade_days(TRIAL_START, TRIAL_END)
+
     total_cash = 0
     total_sec = 0
     for d in trade_days:
-        d_str = d.isoformat() if hasattr(d, 'isoformat') else str(d)[:10]
+        d_str = d.strftime('%Y-%m-%d') if hasattr(d, 'strftime') else str(d)[:10]
         try:
             cash = jq.get_margincash_stocks(d_str)
             sec = jq.get_marginsec_stocks(d_str)
             if cash:
-                df = pd.DataFrame({"code": cash, "type": "cash", "date": d_str})
+                df = pd.DataFrame({"code": cash, "margin_type": "cash", "trade_date": d})
                 n = insert_df(ch, "margin_stocks", df)
                 total_cash += n
             if sec:
-                df = pd.DataFrame({"code": sec, "type": "sec", "date": d_str})
+                df = pd.DataFrame({"code": sec, "margin_type": "sec", "trade_date": d})
                 n = insert_df(ch, "margin_stocks", df)
                 total_sec += n
-            if (total_cash + total_sec) % 100000 == 0:
-                logger.info(f"margin_stocks: {total_cash+total_sec} rows so far")
         except Exception as e:
             logger.error(f"margin_stocks {d_str} failed: {e}")
         time.sleep(0.1)
@@ -166,7 +230,7 @@ def sync_industries(ch: Client):
                 try:
                     stocks = jq.get_industry_stocks(code, date=TRIAL_END)
                     if stocks:
-                        df = pd.DataFrame({"industry_code": code, "industry_name": row.get("name", ""), 
+                        df = pd.DataFrame({"industry_code": code, "industry_name": row.get("name", ""),
                                            "stock_code": stocks, "level": level, "date": TRIAL_END})
                         n = insert_df(ch, "industry_stocks", df)
                         total += n
@@ -249,25 +313,75 @@ def sync_macro(ch: Client):
     return total
 
 def main():
+    parser = argparse.ArgumentParser(description="JQData 扩展数据同步")
+    parser.add_argument("--incremental", action="store_true", help="增量模式（只同步高频变化数据）")
+    parser.add_argument("--days", type=int, default=3, help="增量天数（默认3天）")
+    args = parser.parse_args()
+
     if not JQ_USER or not JQ_PASS:
         raise RuntimeError("JQ_USER/JQ_PASS required")
     jq.auth(JQ_USER, JQ_PASS)
     ch = Client(host=CH_HOST, database=CH_DB)
 
-    # P1
-    sync_mtss(ch)
-    sync_billboard(ch)
-    sync_locked_shares(ch)
-    sync_margin_stocks(ch)
+    if args.incremental:
+        logger.info(f"=== 增量模式：高频数据最近 {args.days} 天 ===")
+        # 增量只跑日频变化的数据
+        sync_margin_stocks(ch, days=args.days)
+        sync_mtss(ch, days=args.days)
+        sync_billboard(ch, days=args.days)
 
-    # P2
-    sync_industries(ch)
-    sync_concepts(ch)
+        # ── 低频数据：检查是否需要更新 ──
+        from datetime import date
+        def _days_since(table: str, col: str = "sync_date") -> int:
+            """查询某表上次同步距今多少天"""
+            try:
+                r = ch.execute(f"SELECT max({col}) FROM {table}")
+                if r and r[0][0]:
+                    last = r[0][0]
+                    if hasattr(last, 'date'):
+                        last = last.date()
+                    return (date.today() - last).days if hasattr(last, 'days') else 999
+            except Exception:
+                pass
+            return 999
 
-    # P3
-    sync_macro(ch)
+        # locked_shares: 每周同步一次
+        if _days_since("locked_shares") > 7:
+            logger.info("locked_shares 超过7天未更新，执行增量同步(30天)")
+            sync_locked_shares(ch, days=30)
 
-    logger.info("=== 全部扩展数据同步完成 ===")
+        # industries: 每月同步一次
+        if _days_since("industry_stocks") > 30:
+            logger.info("industry_stocks 超过30天未更新，执行全量同步")
+            sync_industries(ch)
+
+        # concepts: 每月同步一次
+        if _days_since("concept_stocks") > 30:
+            logger.info("concept_stocks 超过30天未更新，执行全量同步")
+            sync_concepts(ch)
+
+        # macro: 每周同步一次
+        if _days_since("macro_bond_yield_10y") > 7:
+            logger.info("macro 超过7天未更新，执行全量同步")
+            sync_macro(ch)
+
+        logger.info("=== 增量同步完成 ===")
+    else:
+        logger.info("=== 全量模式 ===")
+        # P1
+        sync_mtss(ch)
+        sync_billboard(ch)
+        sync_locked_shares(ch)
+        sync_margin_stocks(ch)
+
+        # P2
+        sync_industries(ch)
+        sync_concepts(ch)
+
+        # P3
+        sync_macro(ch)
+
+        logger.info("=== 全部扩展数据同步完成 ===")
 
 if __name__ == "__main__":
     main()

@@ -208,18 +208,20 @@ SETTINGS index_granularity = 8192;
 ### 2.5 指数成分股权重
 
 ```sql
-CREATE TABLE IF NOT EXISTS index_component (
+CREATE TABLE IF NOT EXISTS index_weights (
     index_code LowCardinality(String) COMMENT '指数代码，如000300.XSHG',
     code String COMMENT '成分股代码',
-    trade_date Date COMMENT '权重日期',
+    date String COMMENT '权重日期',
     weight Float64 COMMENT '权重（%）',
     display_name String COMMENT '成分股名称',
-    created_at DateTime DEFAULT now()
-) ENGINE = ReplicatedMergeTree('/clickhouse/tables/{shard}/index_component', '{replica}')
-PARTITION BY toYYYYMM(trade_date)
-ORDER BY (index_code, trade_date, code)
+    index_name String COMMENT '指数名称',
+    sync_date DateTime DEFAULT now()
+) ENGINE = MergeTree
+ORDER BY (index_code, date, code)
 SETTINGS index_granularity = 8192;
 ```
+
+**同步脚本:** `src/sync_index_weights.py`（全量 + 增量 30 天）
 
 ### 2.6 股票分钟线（前复权）
 
@@ -244,7 +246,7 @@ SETTINGS index_granularity = 8192;
 ### 2.7 市值数据
 
 ```sql
-CREATE TABLE IF NOT EXISTS stock_valuation (
+CREATE TABLE IF NOT EXISTS valuation (
     code LowCardinality(String) COMMENT '股票代码',
     trade_date Date COMMENT '日期',
     pe_ratio Float64 COMMENT '市盈率TTM',
@@ -273,7 +275,7 @@ SETTINGS index_granularity = 8192;
 ### 2.8 融资融券
 
 ```sql
-CREATE TABLE IF NOT EXISTS margin_trading (
+CREATE TABLE IF NOT EXISTS mtss (
     code LowCardinality(String) COMMENT '股票代码',
     trade_date Date COMMENT '日期',
     fin_value Float64 COMMENT '融资余额',
@@ -293,7 +295,7 @@ SETTINGS index_granularity = 8192;
 ### 2.9 龙虎榜
 
 ```sql
-CREATE TABLE IF NOT EXISTS billboard (
+CREATE TABLE IF NOT EXISTS billboard_list (
     code LowCardinality(String) COMMENT '股票代码',
     trade_date Date COMMENT '日期',
     direction LowCardinality(String) COMMENT 'BUY/SELL',
@@ -413,6 +415,44 @@ SETTINGS index_granularity = 8192;
 **同步脚本:** `src/sync_extended.py` 的 `sync_macro()`
 
 其他宏观表：`macro_cn_gdp`, `macro_cn_cpi`, `macro_cn_m2`, `macro_cn_pmi`（结构由 `ensure_table` 动态创建）
+
+### 2.15 ETF 日线
+
+```sql
+CREATE TABLE IF NOT EXISTS etf_daily (
+    code LowCardinality(String),
+    trade_date Date,
+    open Float64,
+    high Float64,
+    low Float64,
+    close Float64,
+    volume UInt64,
+    amount Float64,
+    sync_date DateTime DEFAULT now()
+) ENGINE = MergeTree
+ORDER BY (code, trade_date)
+SETTINGS index_granularity = 8192;
+```
+
+**同步脚本:** `src/sync_etf.py`
+
+### 2.16 其他表（动态创建，无固定建表语句）
+
+以下表由同步脚本在首次写入时通过 `ensure_table()` 动态创建：
+
+| 表名 | 说明 | 同步脚本 |
+|------|------|---------|
+| `locked_shares` | 限售股解禁 | `sync_extended.py` |
+| `margin_stocks` | 融资融券标的列表 | `sync_extended.py` |
+| `concept_stocks` | 概念板块成分股 | `sync_extended.py` |
+| `balance` | 资产负债表（季度） | `sync_fundamentals.py` |
+| `income` | 利润表（季度） | `sync_fundamentals.py` |
+| `cash_flow` | 现金流量表（季度） | `sync_fundamentals.py` |
+| `indicator` | 财务指标（季度） | `sync_fundamentals.py` |
+| `macro_cn_gdp` | GDP数据 | `sync_extended.py` |
+| `macro_cn_cpi` | CPI数据 | `sync_extended.py` |
+| `macro_cn_m2` | M2数据 | `sync_extended.py` |
+| `macro_cn_pmi` | PMI数据 | `sync_extended.py` |
 
 ---
 
