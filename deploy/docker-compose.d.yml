@@ -30,7 +30,7 @@ services:
     restart: unless-stopped
     ports: ["6379:6379"]
     volumes: ["/data/redis:/data"]
-    command: redis-server --appendonly yes --maxmemory 4gb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory 4gb --maxmemory-policy noeviction
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -48,7 +48,9 @@ services:
     container_name: jqdata-api
     restart: unless-stopped
     expose: ["8000"]
-    volumes: ["/data/jqdata-platform/src/main.py:/app/main.py:ro"]
+    volumes:
+      - "/data/jqdata-platform/src/main.py:/app/main.py:ro"
+      - "/data/jqdata-platform/src/:/app/src/:ro"
     environment:
       - CH_HOST=clickhouse
       - CH_DB=jqdata

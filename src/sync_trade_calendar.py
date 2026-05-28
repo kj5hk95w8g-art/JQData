@@ -1,77 +1,70 @@
 #!/usr/bin/env python3
-"""同步 JQData 交易日历到 ClickHouse trade_calendar 表"""
-import os
-import logging
-import jqdatasdk as jq
-from clickhouse_driver import Client
+"""JQData 交易日历同步 -> ClickHouse trade_calendar 表
+
+用法:
+    JQ_USER=xxx JQ_PASS=xxx python3 src/sync_trade_calendar.py
+"""
+import os, sys, logging
 from datetime import date
-import calendar
+from clickhouse_driver import Client
+import jqdatasdk as jq
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("trade-calendar")
 
 JQ_USER = os.getenv("JQ_USER")
 JQ_PASS = os.getenv("JQ_PASS")
+CH_HOST = os.getenv("CH_HOST", "localhost")
+CH_DB = os.getenv("CH_DB", "jqdata")
 
 
-def is_month_end(d: date) -> int:
-    return 1 if d.day == calendar.monthrange(d.year, d.month)[1] else 0
+def ensure_table(ch: Client):
+    ch.execute("""
+        CREATE TABLE IF NOT EXISTS trade_calendar (
+            trade_date Date,
+            is_trading_day UInt8,
+            sync_date DateTime DEFAULT now()
+        ) ENGINE = MergeTree
+        ORDER BY trade_date
+        SETTINGS index_granularity = 8192
+    """)
 
 
-def is_quarter_end(d: date) -> int:
-    return 1 if d.month in [3, 6, 9, 12] and is_month_end(d) else 0
+def main():
+    if not JQ_USER or not JQ_PASS:
+        raise RuntimeError("JQ_USER/JQ_PASS required")
 
-
-def is_year_end(d: date) -> int:
-    return 1 if d.month == 12 and d.day == 31 else 0
-
-
-def sync_trade_calendar():
     jq.auth(JQ_USER, JQ_PASS)
-    ch = Client(host="localhost", database="jqdata")
+    ch = Client(host=CH_HOST, database=CH_DB)
+    ensure_table(ch)
 
-    # 获取所有交易日
-    trade_days = jq.get_all_trade_days()
-    logger.info(f"JQData 交易日总数: {len(trade_days)}, 范围: {trade_days[0]} ~ {trade_days[-1]}")
+    logger.info("=== 同步交易日历 ===")
 
-    trade_set = set(trade_days)
-
-    # 生成完整日历（从第一个交易日到最后一个交易日的所有自然日）
-    from datetime import timedelta
-    start, end = trade_days[0], trade_days[-1]
-    delta = (end - start).days
-
-    records = []
-    for i in range(delta + 1):
-        d = start + timedelta(days=i)
-        records.append((
-            d,
-            1 if d in trade_set else 0,
-            d.year,
-            (d.month - 1) // 3 + 1,
-            d.month,
-            d.isoweekday(),
-            is_month_end(d),
-            is_quarter_end(d),
-            is_year_end(d),
-        ))
-
-    logger.info(f"生成日历记录: {len(records)} 条")
-
-    # 清空并写入
-    ch.execute("TRUNCATE TABLE trade_calendar")
-    ch.execute(
-        """INSERT INTO trade_calendar
-        (trade_date, is_trading_day, year, quarter, month, day_of_week, is_month_end, is_quarter_end, is_year_end)
-        VALUES""",
-        records
+    # 获取 2005-01-01 ~ 今年底的所有交易日
+    end_year = date.today().year + 1
+    trade_days = jq.get_trade_days(
+        start_date="2005-01-01", end_date=f"{end_year}-12-31"
     )
+    trade_set = set(d.strftime("%Y-%m-%d") for d in (trade_days if hasattr(trade_days, 'tolist') else trade_days))
 
-    # 验证
-    cnt = ch.execute("SELECT count() FROM trade_calendar")[0][0]
-    trading_cnt = ch.execute("SELECT count() FROM trade_calendar WHERE is_trading_day = 1")[0][0]
-    logger.info(f"trade_calendar 写入完成: 总记录 {cnt}, 交易日 {trading_cnt}")
+    # 生成所有日历日期
+    import pandas as pd
+    all_dates = pd.date_range("2005-01-01", f"{end_year}-12-31", freq="D")
+    records = []
+    for d in all_dates:
+        d_str = d.strftime("%Y-%m-%d")
+        is_trade = 1 if d_str in trade_set else 0
+        records.append((d.date(), is_trade))
+
+    # 幂等覆盖
+    ch.execute("TRUNCATE TABLE IF EXISTS trade_calendar")
+    ch.execute(
+        "INSERT INTO trade_calendar (trade_date, is_trading_day) VALUES",
+        records,
+    )
+    logger.info(f"trade_calendar 同步完成: {len(records)} 天, "
+                f"其中交易日 {sum(1 for r in records if r[1] == 1)} 天")
 
 
 if __name__ == "__main__":
-    sync_trade_calendar()
+    main()

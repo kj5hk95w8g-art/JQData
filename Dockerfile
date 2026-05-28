@@ -16,9 +16,16 @@ RUN pip install --no-cache-dir \
     pandas==2.2.0 \
     jqdatasdk==1.9.6
 
-# 复制应用代码
-COPY main.py /app/
-COPY sync_daily.py /app/
+# 复制应用代码 & 同步脚本
+COPY src/main.py /app/
+COPY src/sync_base.py /app/src/
+COPY src/sync_daily.py /app/src/
+COPY src/sync_etf.py /app/src/
+COPY src/sync_extended.py /app/src/
+COPY src/sync_fundamentals.py /app/src/
+COPY src/sync_index_weights.py /app/src/
+COPY src/sync_stk_xr_xd.py /app/src/
+COPY src/notify.py /app/src/
 
 EXPOSE 8000
 
