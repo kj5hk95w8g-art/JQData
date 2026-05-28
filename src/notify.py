@@ -30,22 +30,23 @@ WEBHOOK = os.getenv("FEISHU_WEBHOOK_URL") or os.getenv("WEBHOOK_URL", "")
 CH_HOST = os.getenv("CH_HOST", "localhost")
 CH_DB = os.getenv("CH_DB", "jqdata")
 
-# ── 表配置: (表名, 中文名, 日期列, 预期频率) ──
+# ── 表配置: (表名, 中文名, 日期列, 频率, 同步时机) ──
+# 同步时机: "实时"=15:30+23:00双次 / "日"=仅23:00一次 / "—"=手动全量
 TABLES = [
-    ("stock_daily_pre",  "股票日线(前复权)", "trade_date",  "日"),
-    ("stock_daily_post", "股票日线(后复权)", "trade_date",  "日"),
-    ("index_daily",      "指数日线",        "trade_date",  "日"),
-    ("etf_daily",        "ETF日线",         "trade_date",  "日"),
-    ("valuation",        "每日估值",        "day",         "日"),
-    ("margin_stocks",    "融资融券标的",     "trade_date",  "日"),
-    ("mtss",             "融资融券明细",     "date",        "日"),
-    ("billboard_list",   "龙虎榜",          "day",         "日"),
-    ("index_weights",    "指数成分权重",     "date",        "月"),
-    ("stk_xr_xd",        "除权除息",        "report_date", "月"),
-    ("balance",          "资产负债表",       "statDate",    "季"),
-    ("income",           "利润表",          "statDate",    "季"),
-    ("cash_flow",        "现金流量表",       "statDate",    "季"),
-    ("indicator",        "财务指标",        "statDate",    "季"),
+    ("stock_daily_pre",  "股票日线(前复权)", "trade_date",  "日", "实时"),
+    ("stock_daily_post", "股票日线(后复权)", "trade_date",  "日", "实时"),
+    ("index_daily",      "指数日线",        "trade_date",  "日", "实时"),
+    ("etf_daily",        "ETF日线",         "trade_date",  "日", "实时"),
+    ("valuation",        "每日估值",        "day",         "日", "日"),
+    ("margin_stocks",    "融资融券标的",     "trade_date",  "日", "日"),
+    ("mtss",             "融资融券明细",     "date",        "日", "日"),
+    ("billboard_list",   "龙虎榜",          "day",         "日", "日"),
+    ("index_weights",    "指数成分权重",     "date",        "月", "日"),
+    ("stk_xr_xd",        "除权除息",        "report_date", "月", "日"),
+    ("balance",          "资产负债表",       "statDate",    "季", "—"),
+    ("income",           "利润表",          "statDate",    "季", "—"),
+    ("cash_flow",        "现金流量表",       "statDate",    "季", "—"),
+    ("indicator",        "财务指标",        "statDate",    "季", "—"),
 ]
 
 
@@ -120,12 +121,14 @@ def get_last_trade_day() -> Optional[date]:
         return None
 
 
-def table_status(max_date_val, last_trade: Optional[date], frequency: str) -> str:
-    """根据最新日期判断表状态"""
+def table_status(max_date_val, last_trade: Optional[date], frequency: str, sync_time: str = "日") -> str:
+    """根据最新日期判断表状态，返回可操作的状态描述
+    
+    sync_time: 该表的同步频率 — "日"(每日23:00), "实时"(15:30+23:00)
+    """
     if max_date_val is None:
         return "❌ 无数据"
 
-    # 转为 date 对象
     if isinstance(max_date_val, str):
         try:
             d = date.fromisoformat(max_date_val[:10])
@@ -136,50 +139,53 @@ def table_status(max_date_val, last_trade: Optional[date], frequency: str) -> st
     else:
         return f"⚠️ {max_date_val}"
 
-    if last_trade is None:
-        # 无法获取交易日时，用频率对应的合理阈值
-        thresholds = {"日": 3, "月": 35, "季": 95, "—": 9999}
-        threshold = thresholds.get(frequency, 3)
-        delay = (date.today() - d).days
-        if delay <= 0:
-            return "✅ 正常"
-        elif frequency == "日" and delay <= threshold:
-            return f"⚠️ 延{delay}天"
-        elif frequency == "月" and delay <= threshold:
-            return f"✅ 正常"
-        elif frequency == "季" and delay <= threshold:
-            return f"✅ 正常"
-        else:
-            return f"❌ 延{delay}天"
-
-    diff = (last_trade - d).days
+    today = date.today()
+    delay = (today - d).days
+    # 优先用交易日，否则用自然日
+    ref = last_trade if last_trade else today
+    trade_delay = (ref - d).days
 
     if frequency == "日":
-        if diff <= 0:
+        if delay == 0:
             return "✅ 正常"
-        elif diff == 1:
+        elif delay == 1 and sync_time == "日":
+            return f"⏳ 待今晚同步"
+        elif delay == 1:
             return "⚠️ 延1天"
+        elif delay <= 3:
+            return f"⏳ 待今晚同步" if sync_time == "日" else f"⚠️ 延{delay}天"
         else:
-            return f"❌ 延{diff}天"
+            return f"❌ 缺{delay}天"
+
     elif frequency == "月":
-        if diff <= 31:
+        if delay <= 35:
             return "✅ 正常"
-        elif diff <= 62:
-            return "⚠️ 延1月"
+        elif delay <= 62:
+            return "⏳ 待月度更新"
         else:
-            return f"❌ 延{diff}天"
+            return f"❌ 缺{delay}天"
+
     elif frequency == "季":
-        if diff <= 92:
+        if delay <= 95:
             return "✅ 正常"
+        elif delay <= 130:
+            return "⏳ 待季报发布"
         else:
-            return f"⚠️ 延{diff}天"
-    return "✅"
+            return f"⚠️ 需全量同步"
+
+    # 无频率标记的表
+    if delay <= 3:
+        return "✅ 正常"
+    elif delay <= 7:
+        return f"⏳ 延{delay}天"
+    else:
+        return f"❌ 缺{delay}天"
 
 
 def query_tables(ch: Client, last_trade: Optional[date]):
     """查询所有表状态"""
     rows = []
-    for table, name_cn, date_col, freq in TABLES:
+    for table, name_cn, date_col, freq, sync_time in TABLES:
         try:
             # 检查表是否存在
             exists = ch.execute(
@@ -187,7 +193,7 @@ def query_tables(ch: Client, last_trade: Optional[date]):
                 f"WHERE database = '{CH_DB}' AND name = '{table}'"
             )
             if not exists or exists[0][0] == 0:
-                rows.append((name_cn, "—", "—", "未创建", freq))
+                rows.append((name_cn, "—", "未创建", "—", "—", freq))
                 continue
 
             # 最新日期
@@ -207,7 +213,7 @@ def query_tables(ch: Client, last_trade: Optional[date]):
             except Exception:
                 today_new = 0
 
-            status = table_status(max_d, last_trade, freq)
+            status = table_status(max_d, last_trade, freq, sync_time)
 
             # 格式化日期
             if max_d and isinstance(max_d, date):
