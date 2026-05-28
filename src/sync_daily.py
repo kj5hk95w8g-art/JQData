@@ -46,11 +46,11 @@ class JQDataSync(SyncBase):
     def sync_security_info(self) -> int:
         logger.info("=== Syncing security_info ===")
         stocks = jq.get_all_securities(types=["stock"], date=None)
-        stocks["type"] = "stock"
+        stocks["sec_type"] = "stock"
         etfs = jq.get_all_securities(types=["etf"], date=None)
-        etfs["type"] = "etf"
+        etfs["sec_type"] = "etf"
         indexes = jq.get_all_securities(types=["index"], date=None)
-        indexes["type"] = "index"
+        indexes["sec_type"] = "index"
 
         df = pd.concat([stocks, etfs, indexes], ignore_index=False)
         df.reset_index(inplace=True)
@@ -61,8 +61,14 @@ class JQDataSync(SyncBase):
         df["exchange"] = df["code"].apply(
             lambda x: x.split(".")[-1] if "." in x else ""
         )
+        # list_status: 0=已退市, 1=正常上市
+        today = date.today()
+        df["list_status"] = df["end_date"].apply(
+            lambda x: 0 if x and x < today else 1
+        )
 
-        self.ch.execute("TRUNCATE TABLE IF EXISTS security_info")
+        self.ch.execute("ALTER TABLE security_info DELETE WHERE 1=1")
+        self._wait_for_mutations("security_info")
         records = []
         for _, row in df.iterrows():
             records.append(
@@ -70,15 +76,16 @@ class JQDataSync(SyncBase):
                     row["code"],
                     row.get("display_name", ""),
                     row.get("name", ""),
-                    row["type"],
+                    row["sec_type"],
                     row["exchange"],
                     row["start_date"],
                     row["end_date"],
+                    row["list_status"],
                 )
             )
         self.ch.execute(
             "INSERT INTO security_info "
-            "(code, display_name, name, type, exchange, start_date, end_date) VALUES",
+            "(code, display_name, name, sec_type, exchange, start_date, end_date, list_status) VALUES",
             records,
         )
         logger.info(f"security_info synced: {len(records)} records")
