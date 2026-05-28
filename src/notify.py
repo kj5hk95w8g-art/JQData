@@ -50,21 +50,40 @@ TABLES = [
 
 
 def get_quota() -> str:
+    """获取今日额度使用情况"""
+    # 方法1：redis-cli（宿主机直连）
     try:
         used = subprocess.check_output(
             ["redis-cli", "GET", "jqdata_sync:quota_used_today"],
             text=True, timeout=5,
         ).strip()
-        limit = os.getenv("DAILY_QUOTA_LIMIT", "200000000")
-        return f"{int(used):,} / {int(limit):,}"
+        if used and used != "(nil)":
+            limit = os.getenv("DAILY_QUOTA_LIMIT", "200000000")
+            return f"{int(used):,} / {int(limit):,}"
     except Exception:
-        if jq:
-            try:
-                q = jq.get_query_count()
-                return f"{q['spare']:,} / {q['total']:,}"
-            except Exception:
-                pass
-        return "未知"
+        pass
+
+    # 方法2：Python redis 客户端
+    try:
+        import redis as _rd
+        r = _rd.Redis(host=os.getenv("REDIS_HOST", "localhost"),
+                      port=int(os.getenv("REDIS_PORT", "6379")),
+                      db=0, decode_responses=True, socket_connect_timeout=3)
+        used = r.get("jqdata_sync:quota_used_today")
+        if used:
+            limit = os.getenv("DAILY_QUOTA_LIMIT", "200000000")
+            return f"{int(used):,} / {int(limit):,}"
+    except Exception:
+        pass
+
+    # 方法3：JQData API（兜底）
+    if jq:
+        try:
+            q = jq.get_query_count()
+            return f"{q.get('spare', 0):,} / {q.get('total', '?'):,}"
+        except Exception:
+            pass
+    return "未知"
 
 
 def get_last_trade_day() -> Optional[date]:
@@ -98,7 +117,20 @@ def table_status(max_date_val, last_trade: Optional[date], frequency: str) -> st
         return f"⚠️ {max_date_val}"
 
     if last_trade is None:
-        return "✅" if d >= date.today() - timedelta(days=3) else f"⚠️ {d}"
+        # 无法获取交易日时，用频率对应的合理阈值
+        thresholds = {"日": 3, "月": 35, "季": 95, "—": 9999}
+        threshold = thresholds.get(frequency, 3)
+        delay = (date.today() - d).days
+        if delay <= 0:
+            return "✅ 正常"
+        elif frequency == "日" and delay <= threshold:
+            return f"⚠️ 延{delay}天"
+        elif frequency == "月" and delay <= threshold:
+            return f"✅ 正常"
+        elif frequency == "季" and delay <= threshold:
+            return f"✅ 正常"
+        else:
+            return f"❌ 延{delay}天"
 
     diff = (last_trade - d).days
 
@@ -363,6 +395,16 @@ def main():
             },
         })
         sys.exit(1)
+
+    # ── JQData 认证（获取交易日需要）──
+    if jq:
+        jq_user = os.getenv("JQ_USER", "")
+        jq_pass = os.getenv("JQ_PASS", "")
+        if jq_user and jq_pass:
+            try:
+                jq.auth(jq_user, jq_pass)
+            except Exception as e:
+                print(f"[notify] JQData 认证失败: {e}")
 
     # ── 获取交易日 ──
     last_trade = get_last_trade_day()
