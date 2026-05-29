@@ -45,6 +45,8 @@ def insert_df(ch: Client, table: str, df: pd.DataFrame):
     if "id" in df.columns: df = df.drop(columns=["id"])
     df = df.where(pd.notna(df), None)
     df = df.rename(columns={c: _clean_col(c) for c in df.columns})
+    if "day" in df.columns:
+        df = df.rename(columns={"day": "trade_date"})
     # 查询 ClickHouse 表结构，确定各列类型
     ch_types = {}
     try:

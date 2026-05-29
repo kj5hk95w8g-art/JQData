@@ -10,10 +10,25 @@ PROJECT_DIR="/data/jqdata-platform"
 LOG_DIR="$PROJECT_DIR/logs"
 LOG_FILE="$LOG_DIR/jqdata-sync.log"
 SYNC_PHASE="${SYNC_PHASE:-full}"
-PHASES_FILE="/tmp/jqdata-sync-phases.json"
+PHASES_FILE="/tmp/jqdata-sync-phases-${USER:-unknown}.json"
 
 # 确保日志目录存在
 mkdir -p "$LOG_DIR"
+
+# root 用户禁止运行（统一使用 deploy 用户执行）
+if [ "$(id -un)" = "root" ]; then
+    echo "[$(date)] root 用户禁止运行此脚本，请使用 deploy 用户" >> "$LOG_FILE"
+    exit 0
+fi
+
+# 互斥锁：防止同一脚本多实例并行运行
+LOCK_FILE="/tmp/jqdata-sync-incremental.lock"
+exec 200>"$LOCK_FILE"
+if ! flock -n 200; then
+    echo "[$(date)] 另一个同步实例正在运行，退出" >> "$LOG_FILE"
+    exit 0
+fi
+
 
 # 加载环境变量
 if [ -f "$PROJECT_DIR/.env" ]; then
