@@ -225,11 +225,11 @@ def get_securities(
     types: str = Query(None, description="过滤类型：stock,etf,index，逗号分隔"),
 ):
     """获取全市场标的信息"""
-    query = "SELECT code, display_name, name, type, exchange, start_date, end_date FROM security_info"
+    query = "SELECT code, display_name, name, sec_type, exchange, start_date, end_date FROM security_info"
     params = {}
     if types:
         type_list = [t.strip() for t in types.split(",")]
-        query += " WHERE type IN %(types)s"
+        query += " WHERE sec_type IN %(types)s"
         params["types"] = type_list
     query += " ORDER BY code"
     rows = ch.execute(query, params)
