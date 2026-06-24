@@ -12,6 +12,7 @@ inherits:
   - 005-documentation
   - 006-testing
   - 007-database
+  - 009-ai-interaction
 
 # 技术栈
 tech_stack:
