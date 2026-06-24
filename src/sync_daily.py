@@ -393,7 +393,7 @@ class JQDataSync(SyncBase):
         index_codes = [
             "000001.XSHG", "000016.XSHG", "000300.XSHG", "000905.XSHG",
             "399001.XSHE", "399006.XSHE", "399005.XSHE", "000688.XSHG",
-            "000852.XSHG", "399303.XSHE", "000510.XSHG",
+            "000852.XSHG", "399303.XSHE", "000510.XSHG", "932000.XSHG",
         ]
         fields = ["open", "close", "high", "low", "volume", "money"]
         total = 0
