@@ -176,8 +176,12 @@ def sync_locked_shares(ch: Client, days: int = None):
     for idx, code in enumerate(stocks):
         try:
             df = jq.get_locked_shares(code, start_date=start_date, end_date=end_date)
-            n = insert_df(ch, "locked_shares", df)
-            total += n
+            if df is not None and not df.empty:
+                # 防御 jqdatasdk/NumPy 兼容性问题导致的日期类型异常
+                if "day" in df.columns:
+                    df["day"] = df["day"].astype(str)
+                n = insert_df(ch, "locked_shares", df)
+                total += n
             if (idx + 1) % 500 == 0:
                 logger.info(f"locked_shares: {idx+1}/{len(stocks)} done, total={total}")
         except Exception as e:
