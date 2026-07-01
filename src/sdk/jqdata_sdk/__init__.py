@@ -23,14 +23,13 @@ JQData SDK —— 模仿 jqdatasdk 接口的内部数据查询工具
 【除权除息】
     get_xr_xd(codes, start_date, end_date)      → DataFrame   分红送转事件
 
-【宏观】
-    macro.MAC_BOND_YIELD_10Y                    → str         表标识常量
-    macro.run_query(table, start_date, end_date) → DataFrame  宏观数据查询
-
 【工具】
     normalize_code(code)                        → str         代码标准化(000001→000001.XSHE)
     get_trade_days(start_date, end_date)        → DatetimeIndex 交易日历
     get_query_count()                           → dict        调用统计
+
+注意:
+    宏观数据接口(macro)已从 v2.2.0+ 下线，因聚宽 License 3 云端无权限获取。
 """
 
 from .api import (
@@ -80,7 +79,6 @@ def info() -> None:
         ("行业", "get_industry", "申万行业分类 (sw_l1/l2/l3)"),
         ("行情", "get_valuation", "个股市值表 (PE/PB/市值等)"),
         ("除权除息", "get_xr_xd", "分红送转事件"),
-        ("宏观", "macro.run_query", "宏观数据查询 (MAC_BOND_YIELD_10Y等)"),
         ("工具", "normalize_code", "代码标准化 (000001→000001.XSHE)"),
         ("工具", "get_trade_days", "交易日历"),
         ("工具", "get_query_count", "调用统计"),
