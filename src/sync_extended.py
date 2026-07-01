@@ -77,6 +77,8 @@ def insert_df(ch: Client, table: str, df: pd.DataFrame):
         order_by = "(code, day)"
     elif "code" in cols and "date" in cols:
         order_by = "(code, date)"
+    elif "code" in cols and "trade_date" in cols:
+        order_by = "(code, trade_date)"
     elif "sec_code" in cols and "date" in cols:
         order_by = "(sec_code, date)"
     elif "industry_code" in cols and "stock_code" in cols:
@@ -268,52 +270,6 @@ def sync_concepts(ch: Client):
     logger.info(f"concepts completed: {total} rows")
     return total
 
-# ── P3: 宏观数据 ──
-
-def sync_macro(ch: Client):
-    """同步核心宏观指标"""
-    logger.info("=== 开始同步 macro ===")
-    total = 0
-
-    # ── 10年国债收益率（MAC_BOND_YIELD_10Y）──
-    logger.info("正在同步 MAC_BOND_YIELD_10Y（10年期国债收益率）...")
-    try:
-        df = jq.macro.run_query(
-            jq.query(jq.macro.MAC_BOND_YIELD_10Y).limit(50000)
-        )
-        if df is not None and not df.empty:
-            n = insert_df(ch, "macro_bond_yield_10y", df)
-            total += n
-            logger.info(f"macro_bond_yield_10y: {n} rows")
-        else:
-            logger.warning("macro_bond_yield_10y 无数据返回")
-    except Exception as e:
-        logger.error(f"macro_bond_yield_10y failed: {e}")
-
-    # ── 核心表: GDP, CPI, M2, PMI ──
-    tables = [
-        ("macro_cn_gdp", "国内生产总值"),
-        ("macro_cn_cpi", "居民消费价格指数"),
-        ("macro_cn_m2", "广义货币供应量"),
-        ("macro_cn_pmi", "制造业PMI"),
-    ]
-    for table_name, desc in tables:
-        try:
-            attr_name = table_name.upper().replace("MACRO_CN_", "")
-            q = getattr(jq.macro, attr_name, None)
-            if q is None:
-                logger.warning(f"macro table {table_name} ({attr_name}) not found in jq.macro")
-                continue
-            df = jq.macro.run_query(jq.query(q).limit(10000))
-            n = insert_df(ch, table_name, df)
-            total += n
-            logger.info(f"macro {table_name}: {n} rows")
-        except Exception as e:
-            logger.error(f"macro {table_name} failed: {e}")
-        time.sleep(0.3)
-    logger.info(f"macro completed: {total} rows")
-    return total
-
 def main():
     parser = argparse.ArgumentParser(description="JQData 扩展数据同步")
     parser.add_argument("--incremental", action="store_true", help="增量模式（只同步高频变化数据）")
@@ -362,11 +318,6 @@ def main():
             logger.info("concept_stocks 超过30天未更新，执行全量同步")
             sync_concepts(ch)
 
-        # macro: 每周同步一次
-        if _days_since("macro_bond_yield_10y") > 7:
-            logger.info("macro 超过7天未更新，执行全量同步")
-            sync_macro(ch)
-
         logger.info("=== 增量同步完成 ===")
     else:
         logger.info("=== 全量模式 ===")
@@ -379,9 +330,6 @@ def main():
         # P2
         sync_industries(ch)
         sync_concepts(ch)
-
-        # P3
-        sync_macro(ch)
 
         logger.info("=== 全部扩展数据同步完成 ===")
 

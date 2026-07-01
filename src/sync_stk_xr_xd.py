@@ -80,8 +80,7 @@ def insert_df(ch, table, df):
     """将 DataFrame 写入 ClickHouse，自动对齐列"""
     if df is None or df.empty:
         return 0
-    if "id" in df.columns:
-        df = df.drop(columns=["id"])
+    # 保留 JQData 返回的 id 作为 ReplacingMergeTree 去键，禁止丢弃
     df = df.where(pd.notna(df), None)
     df = df.rename(columns={c: _clean_col(c) for c in df.columns})
 
@@ -244,6 +243,12 @@ def sync_stk_xr_xd_incremental(ch, jq_auth=True):
     if to_insert.empty:
         logger.info("STK_XR_XD 增量: 无新增记录")
         return 0
+
+    # 幂等写入：对同一 id 先删除旧记录，再插入新记录。
+    # 这样可解决 plan_progress 状态更新，并避免 MergeTree/ReplacingMergeTree 在后台 merge 前读到重复。
+    ids = to_insert["id"].tolist()
+    logger.info(f"STK_XR_XD 增量: 覆盖 {len(ids)} 条记录")
+    ch.execute("ALTER TABLE stk_xr_xd DELETE WHERE id IN %(ids)s", {"ids": ids})
 
     inserted = insert_df(ch, "stk_xr_xd", to_insert)
     logger.info(f"STK_XR_XD 增量: 新增 {inserted} 行")

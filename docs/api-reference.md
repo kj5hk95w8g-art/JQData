@@ -179,32 +179,6 @@ X-Signature: a1b2c3d4e5f6...
 
 ---
 
-### POST /v1/macro/query
-通用宏观数据查询。
-
-**请求体：**
-```json
-{
-  "table": "macro_bond_yield_10y",
-  "start_date": "2020-01-01",
-  "end_date": "2026-05-19",
-  "columns": "stat_date, yield"
-}
-```
-
-**响应：**
-```json
-{
-  "count": 1560,
-  "data": [
-    ["2020-01-02", 3.15],
-    ["2020-01-03", 3.14]
-  ]
-}
-```
-
----
-
 ### GET /v1/query_count
 查询当日调用统计（内部使用，当前无额度限制）。
 
@@ -250,8 +224,6 @@ xr_xd = jq.get_xr_xd(codes="000001.XSHE", start_date="2025-01-01")
 # ✨ 代码标准化（v2.2.0 新增）
 jq.normalize_code("000001")  # → '000001.XSHE'
 
-# ✨ 宏观数据（v2.2.0 新增）
-df = jq.macro.run_query(jq.macro.MAC_BOND_YIELD_10Y, start_date="2020-01-01")
 ```
 
 **升级：**

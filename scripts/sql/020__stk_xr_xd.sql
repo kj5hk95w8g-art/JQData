@@ -1,7 +1,7 @@
 -- 文件: 020__stk_xr_xd.sql
 -- 表名: stk_xr_xd
 -- 说明: 分红送转（权益分派）
--- 引擎: MergeTree
+-- 引擎: ReplacingMergeTree (id 为 JQData 唯一键，用于去重)
 -- 备注: 支撑持仓收益计算与风控，需及时同步
 -- 回滚: DROP TABLE IF EXISTS jqdata.stk_xr_xd;
 
@@ -56,6 +56,6 @@ CREATE TABLE IF NOT EXISTS jqdata.stk_xr_xd
     `bonus_cancel_pub_date` Date,
     `sync_date` DateTime DEFAULT now()
 )
-ENGINE = MergeTree
-ORDER BY (code, report_date, implementation_pub_date)
+ENGINE = ReplacingMergeTree()
+ORDER BY id
 SETTINGS index_granularity = 8192

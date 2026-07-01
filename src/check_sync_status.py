@@ -22,9 +22,9 @@ TABLES = [
     ("valuation",        "每日估值",        "day",         "日"),
     ("margin_stocks",    "融资融券标的",     "trade_date",  "日"),
     ("mtss",             "融资融券明细",     "date",        "日"),
-    ("billboard_list",   "龙虎榜",          "day",         "日"),
+    ("billboard_list",   "龙虎榜",          "trade_date",  "日"),
     ("index_weights",    "指数成分权重",     "date",        "月"),
-    ("stk_xr_xd",        "除权除息",        "report_date", "月"),
+    ("stk_xr_xd",        "除权除息",        "a_xr_date",   "月"),
     ("security_info",    "标的信息",        "start_date",  "—"),
 ]
 

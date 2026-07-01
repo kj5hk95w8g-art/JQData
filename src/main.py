@@ -409,7 +409,7 @@ def get_xr_xd(
     columns = "code,company_name,a_xr_date,bonus_type,dividend_ratio,transfer_ratio," \
               "bonus_ratio_rmb,bonus_amount_rmb,a_registration_date,a_bonus_date," \
               "plan_progress,implementation_pub_date,report_date"
-    query_sql = f"SELECT {columns} FROM {table} WHERE 1=1"
+    query_sql = f"SELECT {columns} FROM {table} FINAL WHERE 1=1"
     params = {}
     if codes:
         code_list = [c.strip() for c in codes.split(",")]
@@ -422,31 +422,6 @@ def get_xr_xd(
         query_sql += " AND a_xr_date <= %(end_date)s"
         params["end_date"] = end_date
     query_sql += " ORDER BY a_xr_date DESC, code"
-    rows = ch.execute(query_sql, params)
-    return {"count": len(rows), "data": rows}
-
-
-# ── 宏观数据查询 ──
-class MacroQueryRequest(BaseModel):
-    table: str
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
-    columns: Optional[str] = None
-
-
-@app.post("/v1/macro/query")
-def macro_query(req: MacroQueryRequest):
-    """通用宏观数据查询"""
-    table = req.table
-    cols = req.columns or "*"
-    query_sql = f"SELECT {cols} FROM {table} WHERE 1=1"
-    params = {}
-    if req.start_date:
-        query_sql += " AND stat_date >= %(start_date)s"
-        params["start_date"] = req.start_date
-    if req.end_date:
-        query_sql += " AND stat_date <= %(end_date)s"
-        params["end_date"] = req.end_date
     rows = ch.execute(query_sql, params)
     return {"count": len(rows), "data": rows}
 

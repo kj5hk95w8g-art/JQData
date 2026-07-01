@@ -378,10 +378,14 @@ CREATE TABLE IF NOT EXISTS stk_xr_xd (
     total_capital_after_transfer Float64,
     plan_progress LowCardinality(String) COMMENT '预案进度',
     sync_date DateTime DEFAULT now()
-) ENGINE = MergeTree
-ORDER BY (code, report_date, implementation_pub_date)
+) ENGINE = ReplacingMergeTree()
+ORDER BY id
 SETTINGS index_granularity = 8192;
 ```
+
+- `id` 为 JQData 侧唯一标识，作为去重键。
+- 同步脚本对同一 `id` 先 `ALTER TABLE ... DELETE` 再 `INSERT`，保证幂等。
+- 服务端 `/v1/xr_xd` 查询使用 `SELECT ... FINAL`，确保后台 merge 完成前也返回去重后数据。
 
 **同步脚本:** `src/sync_stk_xr_xd.py`（全量+增量+月兜底三模式）
 
@@ -402,21 +406,10 @@ SETTINGS index_granularity = 8192;
 
 **同步脚本:** `src/sync_extended.py` 的 `sync_industries()`
 
-### 2.14 宏观数据（macro_bond_yield_10y）
+### 2.14 宏观数据（已下线）
 
-```sql
-CREATE TABLE IF NOT EXISTS macro_bond_yield_10y (
-    stat_date Date COMMENT '统计日期',
-    yield Float64 COMMENT '10年期国债收益率（%）',
-    sync_date DateTime DEFAULT now()
-) ENGINE = MergeTree
-ORDER BY stat_date
-SETTINGS index_granularity = 8192;
-```
-
-**同步脚本:** `src/sync_extended.py` 的 `sync_macro()`
-
-其他宏观表：`macro_cn_gdp`, `macro_cn_cpi`, `macro_cn_m2`, `macro_cn_pmi`（结构由 `ensure_table` 动态创建）
+> ⚠️ **v2.2.0+ 已下线**：聚宽 License 3 云端账号无宏观数据权限，`macro_bond_yield_10y`、`macro_cn_gdp`、`macro_cn_cpi`、`macro_cn_m2`、`macro_cn_pmi` 等宏观表及同步逻辑已删除。
+> 业务侧如需无风险利率，请使用 `000012.XSHG` 中证国债指数日线自行计算，或接入 akshare / tushare 等替代数据源。
 
 ### 2.15 ETF 日线
 
