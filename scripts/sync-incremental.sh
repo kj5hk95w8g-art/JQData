@@ -8,8 +8,13 @@
 
 PROJECT_DIR="/data/jqdata-platform"
 LOG_DIR="$PROJECT_DIR/logs"
-LOG_FILE="$LOG_DIR/jqdata-sync.log"
 SYNC_PHASE="${SYNC_PHASE:-full}"
+# market 阶段单独日志文件，避免与 full 阶段混在一起
+if [ "$SYNC_PHASE" = "market" ]; then
+    LOG_FILE="$LOG_DIR/jqdata-sync-market.log"
+else
+    LOG_FILE="$LOG_DIR/jqdata-sync.log"
+fi
 PHASES_FILE="/tmp/jqdata-sync-phases-${USER:-unknown}.json"
 
 # 确保日志目录存在
@@ -45,8 +50,12 @@ fi
 
 cd "$PROJECT_DIR"
 
-# ── 统一同步命令 ──
-SYNC_CMD="python3"
+# ── 统一同步命令（优先使用 venv 中的 Python，隔离 NumPy 版本）──
+if [ -x "$PROJECT_DIR/.venv/bin/python3" ]; then
+    SYNC_CMD="$PROJECT_DIR/.venv/bin/python3"
+else
+    SYNC_CMD="python3"
+fi
 FAILED_TASKS=""
 
 # 初始化阶段记录文件
@@ -215,6 +224,12 @@ run_sync "融资融券/龙虎榜" $SYNC_CMD src/sync_extended.py --incremental -
 
 echo "[$(date)] 执行 fundamentals 增量同步" >> "$LOG_FILE"
 run_sync "估值/财务" $SYNC_CMD src/sync_fundamentals.py --incremental --days 7 || true
+
+# 每周日补充同步季度财报数据（避免增量模式跳过季度表）
+if [ "$(date +%u)" = "7" ]; then
+    echo "[$(date)] 周日补充季度财报同步" >> "$LOG_FILE"
+    run_sync "季度财报" $SYNC_CMD src/sync_fundamentals.py --quarterly || true
+fi
 
 # ── 额度报告 ──
 QUOTA_USED=$(redis-cli GET jqdata_sync:quota_used_today 2>/dev/null || echo "0")

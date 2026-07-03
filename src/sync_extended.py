@@ -95,8 +95,8 @@ def insert_df(ch: Client, table: str, df: pd.DataFrame):
 # ── P1: 特色数据 ──
 
 def sync_mtss(ch: Client, days: int = None):
-    """融资融券历史数据（批量查询）"""
-    logger.info(f"=== 开始同步 mtss {'(增量 '+str(days)+'天)' if days else '(全量)'} ===")
+    """融资融券历史数据（批量查询）-> 业务表 margin_trading"""
+    logger.info(f"=== 开始同步 margin_trading {'(增量 '+str(days)+'天)' if days else '(全量)'} ===")
     stocks = jq.get_all_securities(types=["stock"]).index.tolist()
     batch_size = 200
     total = 0
@@ -115,25 +115,27 @@ def sync_mtss(ch: Client, days: int = None):
                 df = jq.get_mtss(batch, start_date=start_date, end_date=end_date)
             else:
                 df = jq.get_mtss(batch, count=10000, end_date=end_date)
-            n = insert_df(ch, "mtss", df)
+            # 字段映射到业务表 margin_trading
+            df = df.rename(columns={"sec_code": "code", "date": "trade_date"})
+            n = insert_df(ch, "margin_trading", df)
             total += n
-            logger.info(f"mtss batch {i//batch_size+1}/{(len(stocks)-1)//batch_size+1}: {n} rows, total={total}")
+            logger.info(f"margin_trading batch {i//batch_size+1}/{(len(stocks)-1)//batch_size+1}: {n} rows, total={total}")
         except Exception as e:
             logger.error(f"mtss batch failed: {e}")
         time.sleep(0.3)
-    logger.info(f"mtss completed: {total} rows")
+    logger.info(f"margin_trading completed: {total} rows")
     return total
 
 def sync_billboard(ch: Client, days: int = None):
-    """龙虎榜数据（按月分段查询 / 增量模式）"""
+    """龙虎榜数据（按月分段查询 / 增量模式）-> 业务表 billboard"""
     if days:
-        logger.info(f"=== 开始同步 billboard_list (增量 {days} 天) ===")
+        logger.info(f"=== 开始同步 billboard (增量 {days} 天) ===")
         start = date.today() - timedelta(days=days)
         end = date.today()
         total = 0
         try:
             df = jq.get_billboard_list(start_date=start.isoformat(), end_date=end.isoformat())
-            n = insert_df(ch, "billboard_list", df)
+            n = insert_df(ch, "billboard", df)
             total += n
             logger.info(f"billboard {start}~{end}: {n} rows")
         except Exception as e:
@@ -141,7 +143,7 @@ def sync_billboard(ch: Client, days: int = None):
         logger.info(f"billboard completed: {total} rows")
         return total
     else:
-        logger.info("=== 开始同步 billboard_list (全量) ===")
+        logger.info("=== 开始同步 billboard (全量) ===")
         start = date(2020, 1, 1)
         end = date.today()
         total = 0
@@ -150,7 +152,7 @@ def sync_billboard(ch: Client, days: int = None):
             seg_end = min(cur + timedelta(days=30), end)
             try:
                 df = jq.get_billboard_list(start_date=cur.isoformat(), end_date=seg_end.isoformat())
-                n = insert_df(ch, "billboard_list", df)
+                n = insert_df(ch, "billboard", df)
                 total += n
                 logger.info(f"billboard {cur}~{seg_end}: {n} rows, total={total}")
             except Exception as e:
@@ -228,8 +230,8 @@ def sync_margin_stocks(ch: Client, days: int = None):
 # ── P2: 行业与概念 ──
 
 def sync_industries(ch: Client):
-    """申万行业成分股"""
-    logger.info("=== 开始同步 industries ===")
+    """申万行业成分股 -> 业务表 industry_component"""
+    logger.info("=== 开始同步 industry_component ===")
     total = 0
     for level in ["sw_l1", "sw_l2", "sw_l3"]:
         try:
@@ -239,8 +241,8 @@ def sync_industries(ch: Client):
                     stocks = jq.get_industry_stocks(code, date=TRIAL_END)
                     if stocks:
                         df = pd.DataFrame({"industry_code": code, "industry_name": row.get("name", ""),
-                                           "stock_code": stocks, "level": level, "date": TRIAL_END})
-                        n = insert_df(ch, "industry_stocks", df)
+                                           "stock_code": stocks, "level": level, "trade_date": TRIAL_END})
+                        n = insert_df(ch, "industry_component", df)
                         total += n
                 except Exception as e:
                     logger.error(f"industry {code} failed: {e}")
@@ -252,8 +254,8 @@ def sync_industries(ch: Client):
     return total
 
 def sync_concepts(ch: Client):
-    """概念板块成分股"""
-    logger.info("=== 开始同步 concepts ===")
+    """概念板块成分股 -> 业务表 concept_component"""
+    logger.info("=== 开始同步 concept_component ===")
     total = 0
     try:
         concepts = jq.get_concepts()
@@ -262,8 +264,8 @@ def sync_concepts(ch: Client):
                 stocks = jq.get_concept_stocks(code, date=TRIAL_END)
                 if stocks:
                     df = pd.DataFrame({"concept_code": code, "concept_name": row.get("name", ""),
-                                       "stock_code": stocks, "date": TRIAL_END})
-                    n = insert_df(ch, "concept_stocks", df)
+                                       "stock_code": stocks, "trade_date": TRIAL_END})
+                    n = insert_df(ch, "concept_component", df)
                     total += n
             except Exception as e:
                 logger.error(f"concept {code} failed: {e}")
@@ -313,13 +315,13 @@ def main():
             sync_locked_shares(ch, days=30)
 
         # industries: 每月同步一次
-        if _days_since("industry_stocks") > 30:
-            logger.info("industry_stocks 超过30天未更新，执行全量同步")
+        if _days_since("industry_component") > 30:
+            logger.info("industry_component 超过30天未更新，执行全量同步")
             sync_industries(ch)
 
         # concepts: 每月同步一次
-        if _days_since("concept_stocks") > 30:
-            logger.info("concept_stocks 超过30天未更新，执行全量同步")
+        if _days_since("concept_component") > 30:
+            logger.info("concept_component 超过30天未更新，执行全量同步")
             sync_concepts(ch)
 
         logger.info("=== 增量同步完成 ===")
