@@ -62,6 +62,19 @@ def _clean_col(name: str) -> str:
     """ClickHouse 字段名清理：替换不合法字符"""
     return name.replace(".", "_").replace(" ", "_").replace("-", "_")
 
+def _to_date(val):
+    """把字符串/时间戳转换为 datetime.date，供 ClickHouse Date 列使用"""
+    if val is None or val == '':
+        return None
+    if isinstance(val, date):
+        return val
+    if isinstance(val, str):
+        return date.fromisoformat(val[:10])
+    # pandas Timestamp / datetime
+    if hasattr(val, 'date'):
+        return val.date()
+    return val
+
 def _ensure_stock_valuation_table(ch: Client):
     """创建/保留 stock_valuation 业务表固定 schema"""
     sql = """CREATE TABLE IF NOT EXISTS stock_valuation (
@@ -160,7 +173,9 @@ def sync_valuation(ch: Client, dates: list):
             # 确保 day 列存在并被映射为 trade_date
             if "trade_date" not in df.columns and "day" in df.columns:
                 df = df.rename(columns={"day": "trade_date"})
-            # day 已经是字符串 YYYY-MM-DD，保留即可；ClickHouse 会接受字符串到 Date 的隐式转换
+            # ClickHouse Date 列需要 datetime.date 对象
+            if "trade_date" in df.columns:
+                df["trade_date"] = df["trade_date"].apply(_to_date)
             cols = [c for c in df.columns]
             records = [tuple(row) for row in df[cols].values]
             ch.execute(f"INSERT INTO stock_valuation ({', '.join(cols)}) VALUES", records)

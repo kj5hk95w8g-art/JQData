@@ -30,6 +30,18 @@ def _ch_type(dtype): return CH_TYPE.get(str(dtype).lower(), "String")
 def _clean_col(name: str) -> str:
     return name.replace(".", "_").replace(" ", "_").replace("-", "_")
 
+def _to_date(val):
+    """把字符串/时间戳转换为 datetime.date，供 ClickHouse Date 列使用"""
+    if val is None or val == '':
+        return None
+    if isinstance(val, date):
+        return val
+    if isinstance(val, str):
+        return date.fromisoformat(val[:10])
+    if hasattr(val, 'date'):
+        return val.date()
+    return val
+
 def ensure_table(ch: Client, table: str, df: pd.DataFrame, order_by: str):
     cols = []
     for c in df.columns:
@@ -61,11 +73,10 @@ def insert_df(ch: Client, table: str, df: pd.DataFrame):
         if pd.api.types.is_datetime64_any_dtype(df[c]):
             df[c] = df[c].astype(str)
         elif df[c].dtype == object:
-            # 根据 ClickHouse 列类型决定 datetime.date 的处理方式
             ch_type = ch_types.get(c, 'String')
             if 'Date' in ch_type and 'DateTime' not in ch_type:
-                # Date 类型保持 datetime.date 对象
-                pass
+                # Date 类型：字符串/时间戳 -> datetime.date
+                df[c] = df[c].apply(lambda x: _to_date(x) if pd.notna(x) and x != '' else None)
             else:
                 # String 等其他类型：datetime.date -> str
                 if df[c].apply(lambda x: isinstance(x, date)).any():
