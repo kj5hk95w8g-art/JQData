@@ -109,18 +109,28 @@ def _fmt_num(val) -> str:
         return str(val)
 
 
-def get_last_trade_day() -> Optional[date]:
-    """获取最近交易日"""
-    if not jq:
-        return None
-    try:
-        days = jq.get_trade_days(
-            start_date=(date.today() - timedelta(days=10)).isoformat(),
-            end_date=date.today().isoformat(),
-        )
-        return days[-1].date() if len(days) > 0 else None
-    except Exception:
-        return None
+def get_last_trade_day(ch: Client = None) -> Optional[date]:
+    """获取最近交易日：优先用 JQData，失败则从 stock_daily_pre 取"""
+    if jq:
+        try:
+            days = jq.get_trade_days(
+                start_date=(date.today() - timedelta(days=10)).isoformat(),
+                end_date=date.today().isoformat(),
+            )
+            if len(days) > 0:
+                d = days[-1]
+                return d.date() if hasattr(d, 'date') else d
+        except Exception:
+            pass
+    if ch:
+        try:
+            r = ch.execute("SELECT max(trade_date) FROM stock_daily_pre")
+            if r and r[0][0]:
+                d = r[0][0]
+                return d if isinstance(d, date) else date.fromisoformat(str(d)[:10])
+        except Exception:
+            pass
+    return None
 
 
 def table_status(max_date_val, last_trade: Optional[date], frequency: str, sync_time: str = "日") -> str:
@@ -148,16 +158,18 @@ def table_status(max_date_val, last_trade: Optional[date], frequency: str, sync_
     trade_delay = (ref - d).days
 
     if frequency == "日":
-        if delay == 0:
+        # 日频表按交易日判断
+        td = trade_delay
+        if td <= 0:
             return "✅ 正常"
-        elif delay == 1 and sync_time == "日":
+        elif td == 1 and sync_time == "日":
             return f"⏳ 待今晚同步"
-        elif delay == 1:
+        elif td == 1:
             return "⚠️ 延1天"
-        elif delay <= 3:
-            return f"⏳ 待今晚同步" if sync_time == "日" else f"⚠️ 延{delay}天"
+        elif td <= 3:
+            return f"⏳ 待今晚同步" if sync_time == "日" else f"⚠️ 延{td}天"
         else:
-            return f"❌ 缺{delay}天"
+            return f"❌ 缺{td}天"
 
     elif frequency == "月":
         if delay <= 35:
@@ -435,7 +447,7 @@ def main():
                 print(f"[notify] JQData 认证失败: {e}")
 
     # ── 获取交易日 ──
-    last_trade = get_last_trade_day()
+    last_trade = get_last_trade_day(ch)
 
     # ── 查询表状态 ──
     table_rows = query_tables(ch, last_trade)

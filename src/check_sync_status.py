@@ -33,12 +33,25 @@ TABLES = [
 THRESHOLDS = {"日": 2, "月": 32, "—": 9999}
 
 
+def _get_last_trade_day(ch: Client) -> date:
+    """从 stock_daily_pre 获取最近交易日；失败则回退到今天"""
+    try:
+        r = ch.execute("SELECT max(trade_date) FROM stock_daily_pre")
+        if r and r[0][0]:
+            d = r[0][0]
+            return d if isinstance(d, date) else date.fromisoformat(str(d)[:10])
+    except Exception:
+        pass
+    return date.today()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--alert", action="store_true", help="异常时 exit 1")
     args = parser.parse_args()
 
     ch = Client(host=CH_HOST, database=CH_DB)
+    last_trade_day = _get_last_trade_day(ch)
     today = date.today()
     issues = []
 
@@ -73,12 +86,14 @@ def main():
             else:
                 d = max_d
 
-            delay = (today - d).days
+            # 日频表按最近交易日判断，月频/无频率表按自然日判断
+            ref_day = last_trade_day if freq == "日" else today
+            delay = (ref_day - d).days
             threshold = THRESHOLDS.get(freq, 2)
 
             if isinstance(delay, int) and delay > threshold:
                 status = "❌ 延迟"
-                issues.append(f"{name}: 延迟 {delay} 天 (最新={d})")
+                issues.append(f"{name}: 延迟 {delay} 天 (最新={d}, 最近交易日={last_trade_day})")
             elif isinstance(delay, int) and delay > 0:
                 status = "⚠️ 稍旧"
             else:
