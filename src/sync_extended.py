@@ -70,17 +70,16 @@ def insert_df(ch: Client, table: str, df: pd.DataFrame):
     except Exception:
         pass
     for c in df.columns:
-        if pd.api.types.is_datetime64_any_dtype(df[c]):
+        ch_type = ch_types.get(c, 'String')
+        if 'Date' in ch_type and 'DateTime' not in ch_type:
+            # Date 类型：统一转为 datetime.date
+            df[c] = df[c].apply(lambda x: _to_date(x) if pd.notna(x) and x != '' else None)
+        elif pd.api.types.is_datetime64_any_dtype(df[c]):
             df[c] = df[c].astype(str)
         elif df[c].dtype == object:
-            ch_type = ch_types.get(c, 'String')
-            if 'Date' in ch_type and 'DateTime' not in ch_type:
-                # Date 类型：字符串/时间戳 -> datetime.date
-                df[c] = df[c].apply(lambda x: _to_date(x) if pd.notna(x) and x != '' else None)
-            else:
-                # String 等其他类型：datetime.date -> str
-                if df[c].apply(lambda x: isinstance(x, date)).any():
-                    df[c] = df[c].astype(str)
+            # String 等其他类型：datetime.date -> str
+            if df[c].apply(lambda x: isinstance(x, date)).any():
+                df[c] = df[c].astype(str)
             # ClickHouse driver 0.2.10 字符串列不支持 None，替换为空字符串
             df[c] = df[c].fillna('')
     cols = [c for c in df.columns]
