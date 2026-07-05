@@ -192,6 +192,9 @@ def sync_locked_shares(ch: Client, days: int = None):
                 # 防御 jqdatasdk/NumPy 兼容性问题导致的日期类型异常
                 if "day" in df.columns:
                     df["day"] = df["day"].astype(str)
+                # locked_shares.num 对应 ClickHouse UInt64，需为整数
+                if "num" in df.columns:
+                    df["num"] = df["num"].fillna(0).astype("int64")
                 n = insert_df(ch, "locked_shares", df)
                 total += n
             if (idx + 1) % 500 == 0:
