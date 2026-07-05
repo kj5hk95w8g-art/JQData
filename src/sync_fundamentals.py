@@ -246,6 +246,14 @@ def main():
                 sync_quarterly(ch, table, quarters)
 
         logger.info("=== 增量完成 ===")
+    elif args.quarterly:
+        # ── 仅同步季度财报 ──
+        quarters = _build_quarters()
+        logger.info(f"=== 季度财报同步：{len(quarters)} 个季度 ===")
+        for table in ["balance", "income", "cash_flow", "indicator"]:
+            logger.info(f"=== 开始同步 {table} ===")
+            sync_quarterly(ch, table, quarters)
+        logger.info("=== 季度财报完成 ===")
     else:
         # ── 全量模式 ──
         quarters = _build_quarters()
