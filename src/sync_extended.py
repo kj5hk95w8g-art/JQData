@@ -260,7 +260,7 @@ def sync_industries(ch: Client):
             logger.info(f"industries {level}: {len(inds)} industries")
         except Exception as e:
             logger.error(f"industries {level} failed: {e}")
-    logger.info(f"industries completed: {total} rows")
+    logger.info(f"industry_component completed: {total} rows")
     return total
 
 def sync_concepts(ch: Client):
@@ -283,7 +283,7 @@ def sync_concepts(ch: Client):
         logger.info(f"concepts: {len(concepts)} concepts, total={total}")
     except Exception as e:
         logger.error(f"concepts failed: {e}")
-    logger.info(f"concepts completed: {total} rows")
+    logger.info(f"concept_component completed: {total} rows")
     return total
 
 def main():
