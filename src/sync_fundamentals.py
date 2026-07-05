@@ -172,7 +172,7 @@ def sync_quarterly(ch: Client, table: str, stat_dates: list):
 def sync_valuation(ch: Client, dates: list):
     """同步每日估值数据到业务表 stock_valuation"""
     _ensure_stock_valuation_table(ch)
-    if dates:
+    if dates is not None and len(dates) > 0:
         # 增量/全量写入前，先删除目标日期已有数据，避免重复
         min_d = min(dates)
         max_d = max(dates)
