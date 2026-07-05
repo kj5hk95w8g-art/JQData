@@ -42,6 +42,16 @@ def _to_date(val):
         return val.date()
     return val
 
+def _wait_mutations(ch: Client, table: str, timeout: int = 120):
+    """等待 ClickHouse 异步 mutation 完成"""
+    start = time.time()
+    while time.time() - start < timeout:
+        rows = ch.execute("SELECT count() FROM system.mutations WHERE table = %(t)s AND is_done=0", {"t": table})
+        if rows[0][0] == 0:
+            return
+        time.sleep(0.5)
+    raise TimeoutError(f"mutations for {table} not done")
+
 def ensure_table(ch: Client, table: str, df: pd.DataFrame, order_by: str):
     cols = []
     for c in df.columns:
@@ -114,9 +124,13 @@ def sync_mtss(ch: Client, days: int = None):
     if days:
         end_date = TRIAL_END
         start_date = (date.today() - timedelta(days=days)).isoformat()
+        ch.execute("ALTER TABLE margin_trading DELETE WHERE trade_date >= %(d)s", {"d": start_date})
+        _wait_mutations(ch, "margin_trading")
     else:
         end_date = TRIAL_END
         start_date = None
+        ch.execute("ALTER TABLE margin_trading DELETE WHERE 1=1")
+        _wait_mutations(ch, "margin_trading")
 
     for i in range(0, len(stocks), batch_size):
         batch = stocks[i:i+batch_size]
@@ -142,6 +156,8 @@ def sync_billboard(ch: Client, days: int = None):
         logger.info(f"=== 开始同步 billboard (增量 {days} 天) ===")
         start = date.today() - timedelta(days=days)
         end = date.today()
+        ch.execute("ALTER TABLE billboard DELETE WHERE trade_date >= %(d)s", {"d": start.isoformat()})
+        _wait_mutations(ch, "billboard")
         total = 0
         try:
             df = jq.get_billboard_list(start_date=start.isoformat(), end_date=end.isoformat())
@@ -154,6 +170,8 @@ def sync_billboard(ch: Client, days: int = None):
         return total
     else:
         logger.info("=== 开始同步 billboard (全量) ===")
+        ch.execute("ALTER TABLE billboard DELETE WHERE 1=1")
+        _wait_mutations(ch, "billboard")
         start = date(2020, 1, 1)
         end = date.today()
         total = 0

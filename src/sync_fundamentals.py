@@ -75,6 +75,17 @@ def _to_date(val):
         return val.date()
     return val
 
+def _wait_mutations(ch: Client, table: str, timeout: int = 120):
+    """等待 ClickHouse 异步 mutation 完成"""
+    import time
+    start = time.time()
+    while time.time() - start < timeout:
+        rows = ch.execute("SELECT count() FROM system.mutations WHERE table = %(t)s AND is_done=0", {"t": table})
+        if rows[0][0] == 0:
+            return
+        time.sleep(0.5)
+    raise TimeoutError(f"mutations for {table} not done")
+
 def _ensure_stock_valuation_table(ch: Client):
     """创建/保留 stock_valuation 业务表固定 schema"""
     sql = """CREATE TABLE IF NOT EXISTS stock_valuation (
@@ -161,6 +172,12 @@ def sync_quarterly(ch: Client, table: str, stat_dates: list):
 def sync_valuation(ch: Client, dates: list):
     """同步每日估值数据到业务表 stock_valuation"""
     _ensure_stock_valuation_table(ch)
+    if dates:
+        # 增量/全量写入前，先删除目标日期已有数据，避免重复
+        min_d = min(dates)
+        max_d = max(dates)
+        ch.execute("ALTER TABLE stock_valuation DELETE WHERE trade_date >= %(min)s AND trade_date <= %(max)s", {"min": str(min_d)[:10], "max": str(max_d)[:10]})
+        _wait_mutations(ch, "stock_valuation")
     total = 0
     for d in dates:
         try:
