@@ -263,6 +263,9 @@ def sync_margin_stocks(ch: Client, days: int = None):
 def sync_industries(ch: Client):
     """申万行业成分股 -> 业务表 industry_component"""
     logger.info("=== 开始同步 industry_component ===")
+    # 避免同一日期重复写入
+    ch.execute("ALTER TABLE industry_component DELETE WHERE trade_date >= %(d)s", {"d": TRIAL_END})
+    _wait_mutations(ch, "industry_component")
     total = 0
     for level in ["sw_l1", "sw_l2", "sw_l3"]:
         try:
@@ -287,6 +290,9 @@ def sync_industries(ch: Client):
 def sync_concepts(ch: Client):
     """概念板块成分股 -> 业务表 concept_component"""
     logger.info("=== 开始同步 concept_component ===")
+    # 避免同一日期重复写入
+    ch.execute("ALTER TABLE concept_component DELETE WHERE trade_date >= %(d)s", {"d": TRIAL_END})
+    _wait_mutations(ch, "concept_component")
     total = 0
     try:
         concepts = jq.get_concepts()
