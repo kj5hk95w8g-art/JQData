@@ -21,8 +21,8 @@ TABLES = [
     ("etf_daily",        "ETF日线",         "trade_date",  "日"),
     ("stock_valuation",  "每日估值",        "trade_date",  "日"),
     ("margin_stocks",    "融资融券标的",     "trade_date",  "日"),
-    ("margin_trading",   "融资融券明细",     "trade_date",  "日"),
-    ("billboard",        "龙虎榜",          "trade_date",  "日"),
+    ("margin_trading",   "融资融券明细",     "trade_date",  "T+1"),
+    ("billboard",        "龙虎榜",          "trade_date",  "T+1"),
     ("industry_component", "申万行业成分",   "trade_date",  "月"),
     ("concept_component", "概念板块成分",    "trade_date",  "月"),
     ("index_weights",    "指数成分权重",     "date",        "月"),
@@ -86,10 +86,15 @@ def main():
             else:
                 d = max_d
 
-            # 日频表按最近交易日判断，月频/无频率表按自然日判断
-            ref_day = last_trade_day if freq == "日" else today
+            # 日频表按最近交易日判断；T+1 表按最近交易日-1判断；月频/无频率表按自然日判断
+            if freq == "日":
+                ref_day = last_trade_day
+            elif freq == "T+1":
+                ref_day = last_trade_day - timedelta(days=1)
+            else:
+                ref_day = today
             delay = (ref_day - d).days
-            threshold = THRESHOLDS.get(freq, 2)
+            threshold = THRESHOLDS.get("日" if freq in ("日", "T+1") else freq, 2)
 
             if isinstance(delay, int) and delay > threshold:
                 status = "❌ 延迟"

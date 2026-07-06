@@ -39,8 +39,8 @@ TABLES = [
     ("etf_daily",        "ETF日线",         "trade_date",  "日", "实时"),
     ("stock_valuation",  "每日估值",        "trade_date",  "日", "日"),
     ("margin_stocks",    "融资融券标的",     "trade_date",  "日", "日"),
-    ("margin_trading",   "融资融券明细",     "trade_date",  "日", "日"),
-    ("billboard",        "龙虎榜",          "trade_date",  "日", "日"),
+    ("margin_trading",   "融资融券明细",     "trade_date",  "T+1", "日"),
+    ("billboard",        "龙虎榜",          "trade_date",  "T+1", "日"),
     ("industry_component", "申万行业成分",   "trade_date",  "月", "日"),
     ("concept_component", "概念板块成分",    "trade_date",  "月", "日"),
     ("index_weights",    "指数成分权重",     "date",        "月", "日"),
@@ -153,11 +153,14 @@ def table_status(max_date_val, last_trade: Optional[date], frequency: str, sync_
 
     today = date.today()
     delay = (today - d).days
-    # 优先用交易日，否则用自然日
-    ref = last_trade if last_trade else today
+    # 优先用交易日，否则用自然日；T+1 表允许滞后一个交易日
+    if frequency == "T+1" and last_trade:
+        ref = last_trade - timedelta(days=1)
+    else:
+        ref = last_trade if last_trade else today
     trade_delay = (ref - d).days
 
-    if frequency == "日":
+    if frequency in ("日", "T+1"):
         # 日频表按交易日判断
         td = trade_delay
         if td <= 0:
