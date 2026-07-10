@@ -8,7 +8,7 @@
 import os
 import sys
 import argparse
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from clickhouse_driver import Client
 
 CH_HOST = os.getenv("CH_HOST", "localhost")
@@ -31,6 +31,39 @@ TABLES = [
 ]
 
 THRESHOLDS = {"日": 2, "月": 32, "—": 9999}
+
+# 残留备份/临时表(_bakYYYYMMDD)保留超过该天数后，巡检升级为可清理提醒
+BACKUP_RETAIN_DAYS = 7
+
+
+def _check_backup_tables(ch: Client):
+    """扫描 jqdata 库中带日期的备份表(*_bakYYYYMMDD)，返回 (打印行, 可清理列表)。
+
+    用于日常巡检提醒：备份表保留 BACKUP_RETAIN_DAYS 天后提示可 DROP，避免长期残留。
+    """
+    try:
+        rows = ch.execute(
+            "SELECT name, metadata_modification_time, total_rows "
+            "FROM system.tables "
+            "WHERE database = %(db)s AND match(name, '_bak[0-9]{8}$') "
+            "ORDER BY metadata_modification_time",
+            {"db": CH_DB},
+        )
+    except Exception:
+        return [], []
+    lines, actionable = [], []
+    now = datetime.now()
+    for name, mdt, total_rows in rows:
+        age = (now - mdt).days if isinstance(mdt, datetime) else -1
+        rows_str = f"{total_rows:,}" if isinstance(total_rows, int) else "?"
+        if age >= BACKUP_RETAIN_DAYS:
+            lines.append(f"  ⚠️  {name}  已保留 {age} 天, {rows_str} 行 — 可清理: DROP TABLE jqdata.{name}")
+            actionable.append(name)
+        else:
+            left = BACKUP_RETAIN_DAYS - age
+            lines.append(f"  ℹ️  {name}  保留中({age}天), {rows_str} 行 — 约 {left} 天后可清理")
+    return lines, actionable
+
 
 
 def _get_last_trade_day(ch: Client) -> date:
@@ -110,6 +143,16 @@ def main():
             issues.append(f"{name}: {e}")
 
     print("-" * 70)
+
+    # 残留备份/临时表巡检提醒（到期后升级为 issue，--alert 会非零退出）
+    bak_lines, bak_actionable = _check_backup_tables(ch)
+    if bak_lines:
+        print("\n备份表残留提醒:")
+        for ln in bak_lines:
+            print(ln)
+        for t in bak_actionable:
+            issues.append(f"备份表 {t} 已超 {BACKUP_RETAIN_DAYS} 天，可清理")
+
     if issues:
         print(f"\n⚠️ 发现 {len(issues)} 个异常:")
         for i in issues:
