@@ -393,7 +393,9 @@ class JQDataSync(SyncBase):
         index_codes = [
             "000001.XSHG", "000016.XSHG", "000300.XSHG", "000905.XSHG",
             "399001.XSHE", "399006.XSHE", "399005.XSHE", "000688.XSHG",
-            "000852.XSHG", "399303.XSHE", "000510.XSHG", "932000.XSHG",
+            "000852.XSHG", "399303.XSHE", "000510.XSHG",
+            # 注：中证2000(932000) JQData 未收录（get_security_info=None、
+            # get_all_securities 无此代码），已剔除；小盘由 399303 国证2000 覆盖
         ]
         fields = ["open", "close", "high", "low", "volume", "money"]
         total = 0
