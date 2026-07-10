@@ -7,6 +7,7 @@
 """
 import os
 import sys
+import re
 import argparse
 from datetime import date, timedelta, datetime
 from clickhouse_driver import Client
@@ -39,29 +40,37 @@ BACKUP_RETAIN_DAYS = 7
 def _check_backup_tables(ch: Client):
     """扫描 jqdata 库中带日期的备份表(*_bakYYYYMMDD)，返回 (打印行, 可清理列表)。
 
-    用于日常巡检提醒：备份表保留 BACKUP_RETAIN_DAYS 天后提示可 DROP，避免长期残留。
+    备份保留天数从表名后缀日期解析（比 metadata_modification_time 可靠：RENAME 会
+    保留原表元数据时间）。超过 BACKUP_RETAIN_DAYS 天提示可 DROP，避免长期残留。
     """
     try:
         rows = ch.execute(
-            "SELECT name, metadata_modification_time, total_rows "
-            "FROM system.tables "
+            "SELECT name, total_rows FROM system.tables "
             "WHERE database = %(db)s AND match(name, '_bak[0-9]{8}$') "
-            "ORDER BY metadata_modification_time",
+            "ORDER BY name",
             {"db": CH_DB},
         )
     except Exception:
         return [], []
     lines, actionable = [], []
-    now = datetime.now()
-    for name, mdt, total_rows in rows:
-        age = (now - mdt).days if isinstance(mdt, datetime) else -1
+    today = date.today()
+    pat = re.compile(r"_bak(\d{8})$")
+    for name, total_rows in rows:
+        m = pat.search(name)
+        if not m:
+            continue
+        try:
+            bak_date = datetime.strptime(m.group(1), "%Y%m%d").date()
+        except ValueError:
+            continue
+        age = (today - bak_date).days
         rows_str = f"{total_rows:,}" if isinstance(total_rows, int) else "?"
         if age >= BACKUP_RETAIN_DAYS:
-            lines.append(f"  ⚠️  {name}  已保留 {age} 天, {rows_str} 行 — 可清理: DROP TABLE jqdata.{name}")
+            lines.append(f"  ⚠️  {name}  已保留 {age} 天(备份于 {bak_date}), {rows_str} 行 — 可清理: DROP TABLE jqdata.{name}")
             actionable.append(name)
         else:
             left = BACKUP_RETAIN_DAYS - age
-            lines.append(f"  ℹ️  {name}  保留中({age}天), {rows_str} 行 — 约 {left} 天后可清理")
+            lines.append(f"  ℹ️  {name}  保留中({age}天, 备份于 {bak_date}), {rows_str} 行 — 约 {left} 天后可清理")
     return lines, actionable
 
 
