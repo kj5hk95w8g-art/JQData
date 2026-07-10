@@ -33,6 +33,21 @@ logging.basicConfig(
 logger = logging.getLogger("jqdata-sync")
 
 
+def _wait_mutations(ch, table: str, timeout: int = 120):
+    """等待 ClickHouse 异步 mutation（ALTER DELETE）完成"""
+    start = time.time()
+    while time.time() - start < timeout:
+        rows = ch.execute(
+            "SELECT count() FROM system.mutations WHERE table = %(t)s AND is_done=0",
+            {"t": table},
+        )
+        if rows[0][0] == 0:
+            return
+        time.sleep(0.5)
+    raise TimeoutError(f"mutations for {table} not done")
+
+
+
 class JQDataSync(SyncBase):
     """股票 & 指数日线同步"""
 
@@ -400,6 +415,14 @@ class JQDataSync(SyncBase):
         fields = ["open", "close", "high", "low", "volume", "money"]
         total = 0
         failed_count = 0
+
+        # 幂等：写入前删除目标区间已有数据，避免 checkpoint 滞后/重跑导致重复
+        self.ch.execute(
+            "ALTER TABLE index_daily DELETE "
+            "WHERE trade_date >= %(min)s AND trade_date <= %(max)s",
+            {"min": str(start_date)[:10], "max": str(end_date)[:10]},
+        )
+        _wait_mutations(self.ch, "index_daily")
 
         for code in index_codes:
             success = False
