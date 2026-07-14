@@ -75,16 +75,23 @@ def _check_backup_tables(ch: Client):
 
 
 
-def _get_last_trade_day(ch: Client) -> date:
-    """从 stock_daily_pre 获取最近交易日；失败则回退到今天"""
+def _get_recent_trade_days(ch: Client, n: int = 2) -> list:
+    """从 stock_daily_pre 取最近 n 个 distinct 交易日（降序）；失败回退今天"""
     try:
-        r = ch.execute("SELECT max(trade_date) FROM stock_daily_pre")
-        if r and r[0][0]:
-            d = r[0][0]
-            return d if isinstance(d, date) else date.fromisoformat(str(d)[:10])
+        r = ch.execute(
+            "SELECT DISTINCT trade_date FROM stock_daily_pre "
+            "ORDER BY trade_date DESC LIMIT %(n)s",
+            {"n": n},
+        )
+        days = [
+            row[0] if isinstance(row[0], date) else date.fromisoformat(str(row[0])[:10])
+            for row in r
+        ]
+        if days:
+            return days
     except Exception:
         pass
-    return date.today()
+    return [date.today()]
 
 
 def main():
@@ -93,7 +100,9 @@ def main():
     args = parser.parse_args()
 
     ch = Client(host=CH_HOST, database=CH_DB)
-    last_trade_day = _get_last_trade_day(ch)
+    trade_days = _get_recent_trade_days(ch)
+    last_trade_day = trade_days[0]
+    prev_trade_day = trade_days[1] if len(trade_days) > 1 else last_trade_day
     today = date.today()
     issues = []
 
@@ -128,11 +137,11 @@ def main():
             else:
                 d = max_d
 
-            # 日频表按最近交易日判断；T+1 表按最近交易日-1判断；月频/无频率表按自然日判断
+            # 日频表按最近交易日判断；T+1 表按“上一个交易日”判断（避免跨周末误判）；月频/无频率表按自然日判断
             if freq == "日":
                 ref_day = last_trade_day
             elif freq == "T+1":
-                ref_day = last_trade_day - timedelta(days=1)
+                ref_day = prev_trade_day
             else:
                 ref_day = today
             delay = (ref_day - d).days

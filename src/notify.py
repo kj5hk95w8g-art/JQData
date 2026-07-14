@@ -133,10 +133,42 @@ def get_last_trade_day(ch: Client = None) -> Optional[date]:
     return None
 
 
-def table_status(max_date_val, last_trade: Optional[date], frequency: str, sync_time: str = "日") -> str:
+def get_recent_trade_days(ch: Client = None, n: int = 2) -> list:
+    """获取最近 n 个交易日（降序）：优先 JQData，失败则从 stock_daily_pre 取。
+
+    用于 T+1 表：其参考日应为“上一个交易日”，而非 last_trade 减一个自然日，
+    否则跨周末（如周一/周二）会把已正常的数据误判为滞后。
+    """
+    if jq:
+        try:
+            days = jq.get_trade_days(
+                start_date=(date.today() - timedelta(days=20)).isoformat(),
+                end_date=date.today().isoformat(),
+            )
+            if days:
+                ds = [d.date() if hasattr(d, 'date') else d for d in days]
+                return list(reversed(ds))[:n]
+        except Exception:
+            pass
+    if ch:
+        try:
+            r = ch.execute(
+                "SELECT DISTINCT trade_date FROM stock_daily_pre "
+                "ORDER BY trade_date DESC LIMIT %(n)s", {"n": n}
+            )
+            ds = [row[0] if isinstance(row[0], date) else date.fromisoformat(str(row[0])[:10]) for row in r]
+            if ds:
+                return ds
+        except Exception:
+            pass
+    return [date.today()]
+
+
+def table_status(max_date_val, last_trade: Optional[date], frequency: str, sync_time: str = "日", prev_trade: Optional[date] = None) -> str:
     """根据最新日期判断表状态，返回可操作的状态描述
-    
+
     sync_time: 该表的同步频率 — "日"(每日23:00), "实时"(15:30+23:00)
+    prev_trade: 上一个交易日；T+1 表以此作为参考日（而非自然日-1），避免跨周末误判
     """
     if max_date_val is None:
         return "❌ 无数据"
@@ -153,9 +185,12 @@ def table_status(max_date_val, last_trade: Optional[date], frequency: str, sync_
 
     today = date.today()
     delay = (today - d).days
-    # 优先用交易日，否则用自然日；T+1 表允许滞后一个交易日
-    if frequency == "T+1" and last_trade:
-        ref = last_trade - timedelta(days=1)
+    # 优先用交易日，否则用自然日；T+1 表以“上一个交易日”为参考（避免跨周末误判）
+    if frequency == "T+1":
+        if prev_trade:
+            ref = prev_trade
+        else:
+            ref = last_trade - timedelta(days=1) if last_trade else today
     else:
         ref = last_trade if last_trade else today
     trade_delay = (ref - d).days
@@ -199,7 +234,7 @@ def table_status(max_date_val, last_trade: Optional[date], frequency: str, sync_
         return f"❌ 缺{delay}天"
 
 
-def query_tables(ch: Client, last_trade: Optional[date]):
+def query_tables(ch: Client, last_trade: Optional[date], prev_trade: Optional[date] = None):
     """查询所有表状态"""
     rows = []
     for table, name_cn, date_col, freq, sync_time in TABLES:
@@ -230,7 +265,7 @@ def query_tables(ch: Client, last_trade: Optional[date]):
             except Exception:
                 today_new = 0
 
-            status = table_status(max_d, last_trade, freq, sync_time)
+            status = table_status(max_d, last_trade, freq, sync_time, prev_trade)
 
             # 格式化日期
             if max_d and isinstance(max_d, date):
@@ -449,11 +484,13 @@ def main():
             except Exception as e:
                 print(f"[notify] JQData 认证失败: {e}")
 
-    # ── 获取交易日 ──
-    last_trade = get_last_trade_day(ch)
+    # ── 获取交易日（含上一个交易日，供 T+1 表精确判断）──
+    recent = get_recent_trade_days(ch)
+    last_trade = recent[0] if recent else None
+    prev_trade = recent[1] if len(recent) > 1 else None
 
     # ── 查询表状态 ──
-    table_rows = query_tables(ch, last_trade)
+    table_rows = query_tables(ch, last_trade, prev_trade)
 
     # ── 解析阶段结果 ──
     phases = parse_phases(phases_file)
