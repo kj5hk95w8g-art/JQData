@@ -394,7 +394,7 @@ class JQDataSync(SyncBase):
         logger.info(f"{table} 增量同步: {start} ~ {end}")
         return self.sync_stock_daily(fq=fq, start_date=start, end_date=end)
 
-    def sync_pre_refresh_xr(self, days: int = 30) -> int:
+    def sync_pre_refresh_xr(self, days: int = 14) -> int:
         """前复权历史回刷：对近 days 天发生除权除息的股票，重拉全部前复权历史。
 
         前复权以最新交易日为基准，每次除权（分红/送股/拆股）都会重算该股
@@ -579,8 +579,8 @@ def main():
     parser.add_argument(
         "--refresh-xr-days",
         type=int,
-        default=30,
-        help="除权窗口天数，默认 30",
+        default=14,
+        help="除权窗口天数，默认 14（日常容错；首次可用大值兜底历史欠账）",
     )
     parser.add_argument(
         "--no-quota-limit",
