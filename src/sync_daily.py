@@ -115,6 +115,7 @@ class JQDataSync(SyncBase):
         fq: str = "pre",
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
+        codes: Optional[List[str]] = None,
     ) -> int:
         table = f"stock_daily_{fq}"
         logger.info(f"=== Syncing {table} ===")
@@ -130,8 +131,11 @@ class JQDataSync(SyncBase):
             )
             return 0
 
-        stocks = jq.get_all_securities(types=["stock"], date=end_date)
-        all_codes = stocks.index.tolist()
+        if codes is None:
+            stocks = jq.get_all_securities(types=["stock"], date=end_date)
+            all_codes = stocks.index.tolist()
+        else:
+            all_codes = list(codes)
         logger.info(f"Total stocks: {len(all_codes)}, range: {start_date} ~ {end_date}")
 
         fields = [
@@ -390,6 +394,31 @@ class JQDataSync(SyncBase):
         logger.info(f"{table} 增量同步: {start} ~ {end}")
         return self.sync_stock_daily(fq=fq, start_date=start, end_date=end)
 
+    def sync_pre_refresh_xr(self, days: int = 30) -> int:
+        """前复权历史回刷：对近 days 天发生除权除息的股票，重拉全部前复权历史。
+
+        前复权以最新交易日为基准，每次除权（分红/送股/拆股）都会重算该股
+        所有历史前复权价。每日增量只更新最新一天，无法修正历史，故对这些
+        股票做全历史幂等覆盖（写入先 DELETE 后 INSERT，安全且不产生重复）。
+        """
+        rows = self.ch.execute(
+            "SELECT DISTINCT code FROM stk_xr_xd "
+            "WHERE a_xr_date >= today() - %(days)s AND a_xr_date <= today()",
+            {"days": days},
+        )
+        codes = sorted(r[0] for r in rows if r and r[0])
+        if not codes:
+            logger.info(f"近 {days} 天无除权股票，跳过前复权回刷")
+            return 0
+        end = self._last_trade_day()
+        logger.info(
+            f"前复权回刷: 近 {days} 天除权股票 {len(codes)} 只，"
+            f"重拉 {self.trial_start} ~ {end} 全部历史"
+        )
+        return self.sync_stock_daily(
+            fq="pre", start_date=self.trial_start, end_date=end, codes=codes
+        )
+
     # ═══════════════════════════════════════════════════════════════
     # 指数日线
     # ═══════════════════════════════════════════════════════════════
@@ -543,6 +572,17 @@ def main():
         "--table", choices=["stock", "index", "all"], default="all", help="同步表"
     )
     parser.add_argument(
+        "--refresh-xr",
+        action="store_true",
+        help="回刷近期除权股票的前复权历史（修正除权导致的历史前复权价失真）",
+    )
+    parser.add_argument(
+        "--refresh-xr-days",
+        type=int,
+        default=30,
+        help="除权窗口天数，默认 30",
+    )
+    parser.add_argument(
         "--no-quota-limit",
         action="store_true",
         help="不受 DAILY_QUOTA_LIMIT 限制",
@@ -554,6 +594,12 @@ def main():
         logger.info("已放开额度限制，只受 JQData 真实额度约束")
 
     sync = JQDataSync()
+
+    if args.refresh_xr:
+        logger.info("=== 前复权历史回刷模式 ===")
+        sync.sync_pre_refresh_xr(days=args.refresh_xr_days)
+        logger.info("=== 同步任务结束 ===")
+        return
 
     if args.incremental:
         logger.info("=== 增量同步模式 ===")

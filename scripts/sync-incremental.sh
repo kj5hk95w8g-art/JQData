@@ -219,6 +219,10 @@ run_sync "指数权重" env SYNC_MODE=incremental $SYNC_CMD src/sync_index_weigh
 echo "[$(date)] 执行 stk_xr_xd 增量同步" >> "$LOG_FILE"
 run_sync "除权除息" env SYNC_MODE=incremental $SYNC_CMD src/sync_stk_xr_xd.py || true
 
+# 前复权历史回刷：stk_xr_xd 之后执行（依赖最新除权数据），修正除权导致的历史前复权价失真
+echo "[$(date)] 执行前复权历史回刷(近期除权股票)" >> "$LOG_FILE"
+run_sync "前复权回刷" $SYNC_CMD src/sync_daily.py --refresh-xr || true
+
 echo "[$(date)] 执行 extended 增量同步" >> "$LOG_FILE"
 run_sync "融资融券/龙虎榜" $SYNC_CMD src/sync_extended.py --incremental --days 7 || true
 
