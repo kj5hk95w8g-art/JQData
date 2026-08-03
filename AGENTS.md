@@ -50,12 +50,12 @@ Host jqdata-d
 
 | 服务 | 容器名 | 端口 | 位置 |
 |------|--------|------|------|
-| ClickHouse | `clickhouse` | 8123(HTTP) / 9000(Native) | D 服务器 |
-| Redis | `redis` | 6379 | D 服务器 |
-| FastAPI | `api` | 8000（仅容器内） | D 服务器 |
-| Nginx | `nginx` | 18080（公网暴露） | D 服务器 |
-| Prometheus | `prometheus` | 9090 | D 服务器 |
-| node-exporter | `node-exporter` | 9100 | D 服务器 |
+| ClickHouse | `jqdata-clickhouse` | 8123(HTTP) / 9000(Native) | D 服务器 |
+| Redis | `jqdata-redis` | 6379 | D 服务器 |
+| FastAPI | `jqdata-api` | 8000（仅容器内） | D 服务器 |
+| Nginx | `jqdata-nginx` | 18080（公网暴露） | D 服务器 |
+| Prometheus | `jqdata-prometheus` | 9090 | D 服务器 |
+| node-exporter | `jqdata-node-exporter` | 9100 | D 服务器（A 服务器另有 `jqdata-node-exporter-a`） |
 | Grafana | `grafana` | 3000 | C 服务器 |
 
 **配置分离：** `docker-compose.*.yml` / `.env.example` 在 Git（只读）；`.env.production` 在服务器本地（❌ 禁止直接修改）。
@@ -79,7 +79,7 @@ Host jqdata-d
 - **发版：** `./scripts/release.sh patch`（或 minor / major）
 - **部署：** SSH 登录服务器执行 `./scripts/deploy.sh v0.1.x`
 
-**数据变更：** 表结构变更必须写成迁移脚本（`migrations/VXXX__description.sql`），禁止手动 `ALTER TABLE`。
+**数据变更：** 表结构变更必须写成迁移脚本（`scripts/sql/NNN__description.sql`，编号递增），禁止手动 `ALTER TABLE`。
 
 ---
 
@@ -103,7 +103,7 @@ Host jqdata-d
 本项目特有：
 
 - 命名：kebab-case（例外：`README.md`, `CHANGELOG.md`, `AGENTS.md`, `TODO.md`）
-- 谁修改谁更新，废弃文件移到 `docs/archive/`
+- 谁修改谁更新，废弃文件移到 `docs/archive/`（目录不存在时随首个归档文件创建）
 - 表结构变更必须同步 `docs/database-schema.md`
 - API 变更必须同步 `docs/api-reference.md`
 - 新增文档准入：全新领域 / 现有文档超 500 行 / 说明为何不更新现有文档

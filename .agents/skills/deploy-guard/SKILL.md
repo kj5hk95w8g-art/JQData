@@ -34,20 +34,20 @@ git log --oneline -3  # verify correct commit/tag
 ### 4. Configuration Separation
 - [ ] `docker-compose.*.yml` in Git is read-only reference
 - [ ] `.env.production` is server-local — never modify in repo
-- [ ] Verify `CONFIG_VERSION` matches code version
+- [ ] Verify `version.txt` matches the tag being deployed
 
 ### 5. Container Health (Server D)
 ```bash
 docker ps  # check running containers
-docker logs clickhouse --tail 50  # check errors
-docker logs redis --tail 20  # check errors
-docker logs api --tail 50  # check FastAPI errors
+docker logs jqdata-clickhouse --tail 50  # check errors
+docker logs jqdata-redis --tail 20  # check errors
+docker logs jqdata-api --tail 50  # check FastAPI errors
 ```
 
 ### 6. Database Backup (Before DDL)
 - [ ] If migration scripts included, backup first:
 ```bash
-docker exec clickhouse clickhouse-client -q "SHOW TABLES"
+docker exec jqdata-clickhouse clickhouse-client -q "SHOW TABLES"
 ```
 
 ### 7. Deploy Sequence

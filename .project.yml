@@ -60,11 +60,13 @@ deployment:
 exceptions:
   - rule: 001-git.branch.feature
     override: 使用 feature/xxx、fix/xxx、hotfix/xxx 格式
+  - rule: 001-git.commit.format
+    override: "commit 类型用英文（feat|fix|data|perf|refactor|docs|test|deploy|chore），格式仍为 类型(范围): 描述"
 
 # 项目特有规则
 project_specific_rules:
   - id: jqdata.db.ddl_migration
-    desc: 表结构变更必须写成迁移脚本（migrations/VXXX__description.sql），禁止手动 ALTER TABLE
+    desc: 表结构变更必须写成迁移脚本（scripts/sql/NNN__description.sql，编号递增），禁止手动 ALTER TABLE
     severity: error
 
   - id: jqdata.db.no_delete
@@ -88,7 +90,7 @@ project_specific_rules:
     severity: warning
 
   - id: jqdata.jqdata.quota_protection
-    desc: 正式账号日额度约 1000 万条，白天自限 550 万条，测试必须用本地数据集
+    desc: 正式账号日额度 2 亿条（License 3），白天手动操作自限 550 万条，测试必须用本地数据集
     severity: error
 
   - id: jqdata.deploy.no_auto_deploy

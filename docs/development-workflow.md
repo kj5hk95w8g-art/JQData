@@ -145,10 +145,10 @@ src/
 
 ### 表结构变更流程
 
-1. 在 `migrations/` 创建迁移脚本：
+1. 在 `scripts/sql/` 创建迁移脚本（编号递增，当前已到 021）：
    ```
-   migrations/V001__create_stock_daily.sql
-   migrations/V002__add_fq_factor.sql
+   scripts/sql/022__create_stock_daily.sql
+   scripts/sql/023__add_fq_factor.sql
    ```
 
 2. 迁移脚本必须包含：
