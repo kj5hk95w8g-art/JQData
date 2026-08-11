@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+#
+# commit-msg 钩子模板 —— 校验 commit message 第一行格式「类型(范围): 描述」
+#
+# 自包含、无外部依赖（bash 内建）。适用于：
+#   - husky：.husky/commit-msg
+#   - 原生 git hooks：.githooks/commit-msg（配合 git config core.hooksPath .githooks）
+#
+# 规则：
+#   - 第一行必须匹配  类型(范围): 描述
+#   - 类型：中英均可（feat|fix|docs|test|chore|refactor|perf|ci|build|revert|
+#                      功能|修复|文档|测试|规则|登记|合并）
+#   - 范围：必填、非空（括号内不能为空）
+#   - 豁免：^Merge / ^merge: / ^Revert
+#
+# 用法：commit-msg 钩子由 git 传入 $1 = commit message 文件路径。
+#       $1 缺省时从 stdin 读取（便于本地手动验证）。
+
+MSG_FILE=$1
+
+if [ -n "$MSG_FILE" ] && [ -f "$MSG_FILE" ]; then
+    FIRST_LINE=$(sed -n '1p' "$MSG_FILE")
+else
+    FIRST_LINE=$(head -n 1)
+fi
+
+# 豁免：merge / merge: / revert
+if echo "$FIRST_LINE" | grep -qE '^Merge |^merge:|^Revert '; then
+    exit 0
+fi
+
+# 校验：类型(范围): 描述（范围必填非空）
+if ! echo "$FIRST_LINE" | grep -qE '^(feat|fix|docs|test|chore|refactor|perf|ci|build|revert|功能|修复|文档|测试|规则|登记|合并)\([^()]+\)[：:]\s*.+'; then
+    echo "❌ commit message 格式不符合规范：${FIRST_LINE:-(空)}"
+    echo ""
+    echo "正确格式：类型(范围): 描述"
+    echo ""
+    echo "  类型（中英均可）:"
+    echo "    英文: feat | fix | docs | test | chore | refactor | perf | ci | build | revert"
+    echo "    中文: 功能 | 修复 | 文档 | 测试 | 规则 | 登记 | 合并"
+    echo "  范围: 模块/文件名，必填且非空（如 白名单 / auth / whitelist）"
+    echo "  描述: 一句话说明"
+    echo ""
+    echo "示例:"
+    echo "  feat(whitelist): 新增白名单导入导出"
+    echo "  功能(白名单): 修复下载路径写死"
+    echo "  fix(auth): 修复 token 过期未刷新"
+    echo ""
+    echo "豁免: Merge / merge: / Revert 开头的提交自动放行"
+    echo ""
+    exit 1
+fi
+
+exit 0

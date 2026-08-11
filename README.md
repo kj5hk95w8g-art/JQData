@@ -25,6 +25,17 @@ python -c "from jqdata_sdk import auth, get_price; auth('your-key'); print(get_p
 ./scripts/deploy.sh d    # D 服务器
 ```
 
+## Git 钩子（对人也强制）
+
+本仓库启用原生 git 钩子（`.githooks/`，含 `commit-msg` 格式校验与 `guards.sh` 提交守卫）。
+**clone 后需执行一次：**
+
+```bash
+git config core.hooksPath .githooks
+```
+
+未配置则钩子不生效。
+
 ## 文档导航
 
 | 文档 | 说明 |

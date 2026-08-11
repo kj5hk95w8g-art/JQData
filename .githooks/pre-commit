@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+#
+# pre-commit 钩子：运行提交守卫 guards.sh（staged 模式，秒级）
+# 契约/单元测试请用 scripts/ci-check.sh（手动或 CI 调用，避免拖慢 pre-commit）
+#
+if [ -f scripts/guards.sh ]; then
+    exec bash scripts/guards.sh
+else
+    echo "⚠️  pre-commit: 未找到 scripts/guards.sh，跳过守卫检查"
+    exit 0
+fi
