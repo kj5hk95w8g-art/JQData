@@ -3,6 +3,7 @@ JQData Platform API
 提供 RESTful 接口查询 ClickHouse 中的金融数据
 """
 import hashlib
+import logging
 import os
 from datetime import date
 from typing import List, Optional
@@ -19,6 +20,8 @@ app = FastAPI(
 )
 
 import math
+
+logger = logging.getLogger(__name__)
 
 # 价格字段集合（需要进行复权调整的字段）
 PRICE_COLS = {"open", "high", "low", "close", "pre_close", "avg", "high_limit", "low_limit"}
@@ -117,13 +120,13 @@ def health():
     try:
         ch.execute("SELECT 1")
         ch_ok = True
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("ClickHouse health check failed: %s", exc)
     try:
         rd.ping()
         rd_ok = True
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Redis health check failed: %s", exc)
     return {
         "status": "ok" if (ch_ok and rd_ok) else "degraded",
         "clickhouse": ch_ok,
@@ -148,6 +151,10 @@ def get_daily(
     if "fq_factor" not in query_cols:
         query_cols += ",fq_factor"
     
+    # 注：table 由 fq 构造，fq 受 Query(pattern="^(pre|post|none)$") 白名单约束，表名安全；
+    # query_cols 来自用户 fields 参数（列名无法用 ? 参数化），属已知注入风险点，保守不改，
+    # 建议后续改为列白名单校验；本模式同样适用于 /v1/daily/batch、/v1/index/{code}、
+    # /v1/valuation 的 fields 列拼接。
     rows = ch.execute(
         f"SELECT {query_cols} FROM {table} WHERE code=%(code)s AND trade_date BETWEEN %(start)s AND %(end)s ORDER BY trade_date",
         {"code": code, "start": start, "end": end},
@@ -266,7 +273,8 @@ def get_index_stocks(
     try:
         rows = ch.execute(query_sql, params)
         return {"code": code, "trade_date": trade_date, "count": len(rows), "data": rows}
-    except Exception:
+    except Exception as exc:
+        logger.warning("get_index_stocks 查询 index_weights 失败(code=%s): %s", code, exc)
         return {"code": code, "trade_date": trade_date, "count": 0, "data": [],
                 "note": "index_weights 表无数据，请先执行 sync_index_weights.py"}
 
@@ -288,7 +296,8 @@ def get_index_weights(
     try:
         rows = ch.execute(query_sql, params)
         return {"code": code, "date": date, "count": len(rows), "data": rows}
-    except Exception:
+    except Exception as exc:
+        logger.warning("get_index_weights 查询 index_weights 失败(code=%s): %s", code, exc)
         return {"code": code, "date": date, "count": 0, "data": [],
                 "note": "index_weights 表无数据，请先执行 sync_index_weights.py"}
 
