@@ -31,6 +31,7 @@ python -c "from jqdata_sdk import auth, get_price; auth('your-key'); print(get_p
 |------|------|
 | [docs/database-schema.md](docs/database-schema.md) | ClickHouse 表结构 |
 | [docs/api-reference.md](docs/api-reference.md) | REST API 接口规范 |
+| [docs/external-consumers.md](docs/external-consumers.md) | 对外接口/SDK 消费者登记册（防误删） |
 | [docs/deployment-guide.md](docs/deployment-guide.md) | 部署运维手册 |
 | [AGENTS.md](AGENTS.md) | 开发规范 |
 

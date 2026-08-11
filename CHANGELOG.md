@@ -6,6 +6,12 @@
 
 ## [Unreleased]
 
+### test
+- 新增契约冒烟测试：`tests/test_api_contract_smoke.py`（12 个 HTTP 路由快照 + 认证 + JSON 形状源码契约）、`tests/test_sdk_contract_smoke.py`（SDK↔HTTP 跨契约），防止对外接口被误删/改坏
+
+### docs
+- 新增 `docs/external-consumers.md` 对外接口/SDK 消费者登记册（消费方：云图中心 `jqdata_adapter.py` 等）
+
 ### data
 - 新增国证2000（399303.XSHE）与中证A500（000510.XSHG）的指数日线和成分股权重同步 (Closes REQ-XXX)
 - 补充中证2000（932000.XSHG）的指数日线同步
