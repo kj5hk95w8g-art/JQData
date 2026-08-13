@@ -1,0 +1,46 @@
+name: Release Tag Guard
+
+# 发版 tag 一致性检查：main 上 version.txt 变化后必须存在同名 tag。
+# 背景：hotfix PR 直接网页合并导致版本已切换但 tag 漏打，部署脚本无法按 tag 切版本。
+# 仅当本次 push 改动了 version.txt 时才检查（普通 hotfix 合并不受影响）；
+# release.sh 推送版本提交后随即推 tag，此处容忍 60s 内的时序差。
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  check-release-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 检查 version.txt 变更对应的 tag
+        run: |
+          # 本次 push 是否改动 version.txt
+          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q '^version.txt$'; then
+            echo "version.txt 有变更，检查 tag..."
+          else
+            echo "✅ version.txt 未变更，跳过"
+            exit 0
+          fi
+
+          ver=$(cat version.txt)
+          echo "version.txt = $ver"
+
+          # release.sh 先推 commit 再推 tag，容忍短暂时序差
+          for i in 1 2 3 4 5 6; do
+            git fetch --tags origin -q
+            if git rev-parse -q --verify "refs/tags/v$ver" >/dev/null; then
+              echo "✅ tag v$ver 存在"
+              exit 0
+            fi
+            sleep 10
+          done
+
+          echo "❌ version.txt 已升至 $ver，但 60s 内未出现 tag v$ver"
+          echo "   请检查是否漏跑 scripts/release.sh，或手动补 tag："
+          echo "   git tag v$ver && git push origin v$ver"
+          exit 1

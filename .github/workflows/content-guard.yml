@@ -1,0 +1,29 @@
+name: Content Guard
+
+# 内容级检查（全项目统一）：拦截本地钩子防不住、或 --no-verify 绕过的违规内容。
+# 规则 1：禁止符号链接入库（v4.3.3 生产事故：软链入库后生产 checkout 指向不存在路径）。
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+jobs:
+  no-symlink:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 禁止符号链接入库
+        run: |
+          hits=$(git diff --raw origin/${{ github.base_ref }}...HEAD | awk '$2 ~ /^120000/ {print $NF}')
+          if [ -n "$hits" ]; then
+            echo "❌ 本 PR 包含符号链接（symlink），禁止入库："
+            echo "$hits"
+            echo ""
+            echo "软链指向提交者本机路径，其他机器/生产 checkout 后不可达。"
+            echo "请改用真实文件/目录并视需要加入 .gitignore。"
+            exit 1
+          fi
+          echo "✅ 无符号链接"

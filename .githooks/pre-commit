@@ -3,6 +3,18 @@
 # pre-commit 钩子：运行提交守卫 guards.sh（staged 模式，秒级）
 # 契约/单元测试请用 scripts/ci-check.sh（手动或 CI 调用，避免拖慢 pre-commit）
 #
+# ===== 拦截符号链接入库 =====
+# v4.3.3 生产事故教训：本地软链被 git add -A 带入库，生产 checkout 后指向不存在路径。
+# 全项目统一规则（~/.ai-rules 登记项目一致）：符号链接一律禁止入库。
+SYMLINK_FILES=$(git diff --cached --raw | awk '$2 ~ /^120000/ {print $NF}')
+if [ -n "$SYMLINK_FILES" ]; then
+    echo "❌ 禁止提交符号链接（symlink）："
+    echo "$SYMLINK_FILES" | while read -r f; do echo "  - $f"; done
+    echo "   软链指向本机路径，其他机器/生产 checkout 后不可达。"
+    echo "   请改用真实文件/目录并视需要加入 .gitignore。"
+    exit 1
+fi
+
 if [ -f scripts/guards.sh ]; then
     exec bash scripts/guards.sh
 else
