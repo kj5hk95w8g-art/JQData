@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""JQData 同步完成飞书卡片通知
+"""JQData 同步完成飞书卡片通知（sqlite 版）
 
 用法:
     # 仅查询表状态
@@ -11,14 +11,17 @@
 环境变量:
     FEISHU_WEBHOOK_URL  飞书机器人 webhook（优先）
     WEBHOOK_URL         通用 webhook（备选）
+    JQDATA_DB           sqlite 库路径（默认 /data/jqdata-platform/data/jqdata.db）
 """
 import os
 import sys
 import json
+import sqlite3
 import subprocess
 from datetime import datetime, date, timedelta
 from typing import Optional
-from clickhouse_driver import Client
+
+from sql_ident import ident, KNOWN_TABLES, KNOWN_COLUMNS
 
 try:
     import jqdatasdk as jq
@@ -27,8 +30,7 @@ except ImportError:
 
 # ── 配置 ──
 WEBHOOK = os.getenv("FEISHU_WEBHOOK_URL") or os.getenv("WEBHOOK_URL", "")
-CH_HOST = os.getenv("CH_HOST", "localhost")
-CH_DB = os.getenv("CH_DB", "jqdata")
+DB_PATH = os.getenv("JQDATA_DB", "/data/jqdata-platform/data/jqdata.db")
 
 # ── 表配置: (表名, 中文名, 日期列, 频率, 同步时机) ──
 # 同步时机: "实时"=15:30+23:00双次 / "日"=仅23:00一次 / "—"=手动全量
@@ -52,45 +54,29 @@ TABLES = [
 ]
 
 
-def get_quota() -> str:
-    """获取今日额度使用情况"""
+def get_quota(db: sqlite3.Connection = None) -> str:
+    """获取今日额度使用情况（sqlite-migration 后存 sync_meta；quota_date 非今日视为未使用）"""
     limit = os.getenv("DAILY_QUOTA_LIMIT", "200000000")
     total = "?"
+    used = None
 
-    # 方法1：redis-cli（宿主机直连）
-    try:
-        used = subprocess.check_output(
-            ["redis-cli", "GET", "jqdata_sync:quota_used_today"],
-            text=True, timeout=5,
-        ).strip()
-        if used and used != "(nil)":
-            if jq:
-                try:
-                    q = jq.get_query_count()
-                    total = str(q.get("total", "?"))
-                except Exception:
-                    pass
-            return f"今日已用: {int(used):,}（上限 {int(limit)//10000}万，JQ总额 {_fmt_num(total)}）"
-    except Exception:
-        pass
+    if db:
+        try:
+            rows = dict(db.execute("SELECT key, value FROM sync_meta "
+                                   "WHERE key IN ('quota_used_today', 'quota_date')"))
+            if rows.get("quota_date") == date.today().isoformat() and rows.get("quota_used_today"):
+                used = int(rows["quota_used_today"])
+        except Exception:
+            pass
 
-    # 方法2：Python redis 客户端
-    try:
-        import redis as _rd
-        r = _rd.Redis(host=os.getenv("REDIS_HOST", "localhost"),
-                      port=int(os.getenv("REDIS_PORT", "6379")),
-                      db=0, decode_responses=True, socket_connect_timeout=3)
-        used = r.get("jqdata_sync:quota_used_today")
-        if used:
-            if jq:
-                try:
-                    q = jq.get_query_count()
-                    total = str(q.get("total", "?"))
-                except Exception:
-                    pass
-            return f"今日已用: {int(used):,}（上限 {int(limit)//10000}万，JQ总额 {_fmt_num(total)}）"
-    except Exception:
-        pass
+    if used is not None:
+        if jq:
+            try:
+                q = jq.get_query_count()
+                total = str(q.get("total", "?"))
+            except Exception:
+                pass
+        return f"今日已用: {used:,}（上限 {int(limit)//10000}万，JQ总额 {_fmt_num(total)}）"
 
     return "未知"
 
@@ -109,7 +95,7 @@ def _fmt_num(val) -> str:
         return str(val)
 
 
-def get_last_trade_day(ch: Client = None) -> Optional[date]:
+def get_last_trade_day(db: sqlite3.Connection = None) -> Optional[date]:
     """获取最近交易日：优先用 JQData，失败则从 stock_daily_pre 取"""
     if jq:
         try:
@@ -122,18 +108,17 @@ def get_last_trade_day(ch: Client = None) -> Optional[date]:
                 return d.date() if hasattr(d, 'date') else d
         except Exception:
             pass
-    if ch:
+    if db:
         try:
-            r = ch.execute("SELECT max(trade_date) FROM stock_daily_pre")
-            if r and r[0][0]:
-                d = r[0][0]
-                return d if isinstance(d, date) else date.fromisoformat(str(d)[:10])
+            r = db.execute("SELECT max(trade_date) FROM stock_daily_pre").fetchone()
+            if r and r[0]:
+                return date.fromisoformat(str(r[0])[:10])
         except Exception:
             pass
     return None
 
 
-def get_recent_trade_days(ch: Client = None, n: int = 2) -> list:
+def get_recent_trade_days(db: sqlite3.Connection = None, n: int = 2) -> list:
     """获取最近 n 个交易日（降序）：优先 JQData，失败则从 stock_daily_pre 取。
 
     用于 T+1 表：其参考日应为“上一个交易日”，而非 last_trade 减一个自然日，
@@ -150,13 +135,13 @@ def get_recent_trade_days(ch: Client = None, n: int = 2) -> list:
                 return list(reversed(ds))[:n]
         except Exception:
             pass
-    if ch:
+    if db:
         try:
-            r = ch.execute(
+            r = db.execute(
                 "SELECT DISTINCT trade_date FROM stock_daily_pre "
-                "ORDER BY trade_date DESC LIMIT %(n)s", {"n": n}
-            )
-            ds = [row[0] if isinstance(row[0], date) else date.fromisoformat(str(row[0])[:10]) for row in r]
+                "ORDER BY trade_date DESC LIMIT ?", (n,)
+            ).fetchall()
+            ds = [date.fromisoformat(str(row[0])[:10]) for row in r]
             if ds:
                 return ds
         except Exception:
@@ -234,46 +219,47 @@ def table_status(max_date_val, last_trade: Optional[date], frequency: str, sync_
         return f"❌ 缺{delay}天"
 
 
-def query_tables(ch: Client, last_trade: Optional[date], prev_trade: Optional[date] = None):
+def query_tables(db: sqlite3.Connection, last_trade: Optional[date], prev_trade: Optional[date] = None):
     """查询所有表状态"""
     rows = []
+    existing = {r[0] for r in db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+    )}
+    today_iso = date.today().isoformat()
     for table, name_cn, date_col, freq, sync_time in TABLES:
         try:
             # 检查表是否存在
-            exists = ch.execute(
-                f"SELECT count() FROM system.tables "
-                f"WHERE database = '{CH_DB}' AND name = '{table}'"
-            )
-            if not exists or exists[0][0] == 0:
+            if table not in existing:
                 rows.append((name_cn, "—", "未创建", "—", "—", freq))
                 continue
 
             # 最新日期
-            r = ch.execute(f"SELECT max({date_col}) FROM {table}")
-            max_d = r[0][0] if r and r[0][0] else None
+            max_d = db.execute(
+                "SELECT max({date_col}) FROM {table}".format(
+                    date_col=ident(date_col, KNOWN_COLUMNS),
+                    table=ident(table, KNOWN_TABLES))
+            ).fetchone()[0]
 
             # 总数据量
-            r2 = ch.execute(f"SELECT count() FROM {table}")
-            total = r2[0][0] if r2 else 0
+            total = db.execute(
+                "SELECT count(*) FROM {table}".format(
+                    table=ident(table, KNOWN_TABLES))
+            ).fetchone()[0]
 
-            # 今日同步量
+            # 今日同步量（sync_date 可能为 NULL，字符串比较天然排除）
             try:
-                r3 = ch.execute(
-                    f"SELECT count() FROM {table} WHERE sync_date >= today()"
-                )
-                today_new = r3[0][0] if r3 else 0
+                today_new = db.execute(
+                    "SELECT count(*) FROM {table} WHERE sync_date >= ?".format(
+                        table=ident(table, KNOWN_TABLES)),
+                    (today_iso,),
+                ).fetchone()[0]
             except Exception:
                 today_new = 0
 
             status = table_status(max_d, last_trade, freq, sync_time, prev_trade)
 
             # 格式化日期
-            if max_d and isinstance(max_d, date):
-                max_str = max_d.strftime("%m-%d")
-            elif max_d:
-                max_str = str(max_d)[:10]
-            else:
-                max_str = "N/A"
+            max_str = str(max_d)[5:10] if max_d else "N/A"
 
             today_str = f"{today_new:,}" if today_new > 0 else "—"
 
@@ -453,11 +439,11 @@ def main():
     log_file = sys.argv[2] if len(sys.argv) > 2 else None
     phases_file = sys.argv[3] if len(sys.argv) > 3 else None
 
-    # ── 连接 ClickHouse ──
+    # ── 连接 sqlite（只读）──
     try:
-        ch = Client(host=CH_HOST, database=CH_DB)
+        db = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=30)
     except Exception as e:
-        print(f"[notify] ClickHouse 连接失败: {e}")
+        print(f"[notify] sqlite 连接失败: {e}")
         # 即使连不上也发个简单告警
         send_card({
             "msg_type": "interactive",
@@ -468,7 +454,7 @@ def main():
                 },
                 "elements": [{
                     "tag": "div",
-                    "text": {"tag": "lark_md", "content": f"无法连接 ClickHouse: {e}"},
+                    "text": {"tag": "lark_md", "content": f"无法连接 sqlite（{DB_PATH}）: {e}"},
                 }],
             },
         })
@@ -485,12 +471,12 @@ def main():
                 print(f"[notify] JQData 认证失败: {e}")
 
     # ── 获取交易日（含上一个交易日，供 T+1 表精确判断）──
-    recent = get_recent_trade_days(ch)
+    recent = get_recent_trade_days(db)
     last_trade = recent[0] if recent else None
     prev_trade = recent[1] if len(recent) > 1 else None
 
     # ── 查询表状态 ──
-    table_rows = query_tables(ch, last_trade, prev_trade)
+    table_rows = query_tables(db, last_trade, prev_trade)
 
     # ── 解析阶段结果 ──
     phases = parse_phases(phases_file)
@@ -502,7 +488,7 @@ def main():
     log_tail = read_log_tail(log_file) if has_failure else None
 
     # ── 额度 ──
-    quota = get_quota()
+    quota = get_quota(db)
 
     # ── 构建并发送 ──
     card = build_card(status, table_rows, quota, phases, log_tail)

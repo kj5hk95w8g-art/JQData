@@ -35,6 +35,7 @@ KNOWN_TABLES = {
     "stk_xr_xd",
     "margin_trading", "billboard", "locked_shares", "margin_stocks",
     "industry_component", "concept_component", "index_component",
+    "etf_daily",
     "balance", "income", "cash_flow", "indicator",
     "trade_calendar",
     "sync_meta",
@@ -59,6 +60,8 @@ KNOWN_COLUMNS = {
     "company_name", "a_xr_date", "bonus_type", "dividend_ratio", "transfer_ratio",
     "bonus_ratio_rmb", "bonus_amount_rmb", "a_registration_date", "a_bonus_date",
     "plan_progress", "implementation_pub_date", "report_date",
+    # 财务三表 + 指标（statDate 大写，notify.py 查询用）
+    "statDate", "pubDate",
     # 同步元信息 / 通用日期列
     "sync_date", "key", "note",
 }
