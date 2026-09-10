@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
 # guards.sh 模板 —— 通用提交守卫（block / warn 两级）
+# TEMPLATE_VERSION: 2
 #
 # 用法：
 #   bash guards.sh                 # 默认扫描 git staged 文件（pre-commit 用）
@@ -8,7 +9,7 @@
 #
 # 自包含、无外部依赖（bash 内建 + git）。输出中文，明确标注 block / warn。
 #
-# 三类 block 检查 + 一类 warn 检查：
+# 三类 block 检查 + 一类 warn 检查 + 一类可选 block：
 #   1. [block] 代码文件（.py/.ts/.tsx/.js/.sh）出现 /Users/ 硬编码绝对路径
 #   2. [block] .py 中 execute(f"...") / f"SELECT|INSERT|UPDATE|DELETE" 拼 SQL
 #              （值拼接；纯占位符串拼接如 ','.join('?'*n) 不算）
@@ -16,6 +17,12 @@
 #              （排除 .env*；排除测试桩值 test/fake/dummy/example）
 #   4. [warn ] diff 触及 backend/routes、frontend/src、python-backend/routes、src/
 #              但未触及 docs/ —— 提醒同步文档（不阻塞）
+#   5. [block·可选] 路由文件行数门禁：ROUTE_GLOB 非空时启用，超 ROUTE_MAX_LINES
+#              行即阻塞（防业务逻辑回流 route 层；管家 v3.3.24 Phase 3 下沉后固防）
+#
+# 注意：本文件是 ~/.ai-rules/enforcement/ 的模板源。项目实例由 sync-templates.sh
+# 同步；有本地扩展的项目（如管家 SQL 豁免标记）同步时人工 diff 合并，勿整文件覆盖。
+# check.py 巡检会比较 TEMPLATE_VERSION，实例落后会有提醒。
 
 # ---------- 文件列表 ----------
 if [ $# -gt 0 ]; then
@@ -85,6 +92,36 @@ done
 if [ "$TOUCHES_CODE" = true ] && [ "$TOUCHES_DOCS" = false ]; then
     echo "⚠️  [warn] diff 触及 backend/routes、frontend/src、python-backend/routes 或 src/，但未触及 docs/"
     echo "         如涉及功能/接口变更，请同步更新 docs/ 下对应文档（005-documentation 红线）"
+fi
+
+# ---------- 可选：路由文件行数门禁 ----------
+# 路径与阈值变量化：项目实例按需覆写（例：管家 ROUTE_GLOB='python-backend/routes/*.py' ROUTE_MAX_LINES=800）
+# 模板默认关闭（ROUTE_GLOB 为空）。检查对象是 diff 触及的文件，不是全量扫描，保持 pre-commit 轻量。
+ROUTE_GLOB="${ROUTE_GLOB:-}"
+ROUTE_MAX_LINES="${ROUTE_MAX_LINES:-800}"
+if [ -n "$ROUTE_GLOB" ]; then
+    for f in "${FILES[@]}"; do
+        # 用 bash glob 匹配（case 语法对 ** 不友好，这里做前缀+通配匹配）
+        case "$f" in
+            $ROUTE_GLOB)
+                [ -f "$f" ] || continue
+                LINES=$(wc -l < "$f" | tr -d ' ')
+                if [ "$LINES" -gt "$ROUTE_MAX_LINES" ]; then
+                    # 净增量判断：本次 diff 在缩文件则放行（鼓励渐进瘦身，不惩罚减行提交）
+                    ADDED=$(git diff --cached --numstat -- "$f" 2>/dev/null | awk '{print $1}')
+                    REMOVED=$(git diff --cached --numstat -- "$f" 2>/dev/null | awk '{print $2}')
+                    NET=$(( ${ADDED:-0} - ${REMOVED:-0} ))
+                    if [ "$NET" -gt 0 ]; then
+                        BLOCKED=1
+                        echo "❌ [block] $f 共 ${LINES} 行（超上限 ${ROUTE_MAX_LINES}）且本次净增 ${NET} 行"
+                        echo "          （业务逻辑应下沉 services/，route 层只做 HTTP 装配；门禁可经 ROUTE_MAX_LINES 调整）"
+                    else
+                        echo "ℹ️  $f 共 ${LINES} 行仍超上限 ${ROUTE_MAX_LINES}，但本次为净减行，放行"
+                    fi
+                fi
+                ;;
+        esac
+    done
 fi
 
 # ---------- 汇总 ----------
