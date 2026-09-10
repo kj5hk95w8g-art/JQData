@@ -29,10 +29,10 @@ if [ -z "$DB_PATH" ] || [ ! -f "$DB_PATH" ]; then
     echo "❌ [migration_check] 未定位到数据库文件（DB_PATH 未设且 config.DB_PATH 不可读）"
     exit 1
 fi
-echo "🔍 [migration_check] 库：$DB_PATH；迁移目录：$MIG_DIR"
+echo "🔍 [migration_check] 库：${DB_PATH}；迁移目录：$MIG_DIR"
 
 if [ ! -d "$MIG_DIR" ]; then
-    echo "✅ [migration_check] 无迁移目录（$MIG_DIR），跳过"
+    echo "✅ [migration_check] 无迁移目录（${MIG_DIR}），跳过"
     exit 0
 fi
 
@@ -61,7 +61,12 @@ WARNED=0
 for m in "$MIG_DIR"/*.py; do
     [ -f "$m" ] || continue
     # 提取 TARGET_TABLES = [...] / (...)
-    DECL=$(grep -m1 -E "^TARGET_TABLES\s*=" "$m" 2>/dev/null | sed -E "s/^TARGET_TABLES\s*=\s*[\(\[]//; s/[\)\]]\s*$//")
+    DECL=$(grep -m1 "TARGET_TABLES" "$m" 2>/dev/null | python3 -c "
+import sys, re
+line = sys.stdin.read()
+m = re.search(r'TARGET_TABLES\\s*=\\s*[(\[](.*?)[)\\]]', line, re.S)
+print(m.group(1) if m else '')
+")
     if [ -z "$DECL" ]; then
         echo "⚠️  [warn] $m 未声明 TARGET_TABLES，无法核对（请补机读声明）"
         WARNED=1
@@ -71,7 +76,7 @@ for m in "$MIG_DIR"/*.py; do
     TBL=($(echo "$DECL" | tr -d "'\"" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep -v '^$'))
     for t in "${TBL[@]}"; do
         if echo "$TABLES" | grep -qx "$t"; then
-            echo "✅ $t（$(basename "$m")）已存在"
+            echo "✅ ${t}（$(basename "$m")）已存在"
         else
             FAILED=1
             echo "❌ [block] 表 $t 缺失 —— $(basename "$m") 声明但库中不存在"
@@ -85,5 +90,5 @@ if [ "$FAILED" -eq 1 ]; then
     echo "❌ migration_check: 存在漏跑迁移，请在目标环境执行上述命令后重查"
     exit 1
 fi
-echo "✅ migration_check: 通过（warn=$WARNED）"
+echo "✅ migration_check: 通过（warn=${WARNED}）"
 exit 0
