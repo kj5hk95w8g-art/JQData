@@ -7,7 +7,7 @@
 > 互为镜像（双向登记，改任一处须同步另一处）。
 > **配套防线**：`tests/test_api_contract_smoke.py`（HTTP 路由/认证/JSON 形状源码契约）
 > 与 `tests/test_sdk_contract_smoke.py`（SDK↔HTTP 跨契约）。
-> **最后核对日期**：2026-08-21（M6 sqlite 化切流后核对）
+> **最后核对日期**：2026-09-16（新增 QuantLab `/v1/securities` 月度消费方登记，与 QuantLab `docs/upstream-deps.md` 互核）
 
 ---
 
@@ -69,7 +69,7 @@ Python SDK `src/sdk/jqdata_sdk`（`import jqdata_sdk as jq`，自动附加签名
 |--------|---------|------|---------|---------|
 | **云图中心（yuntuCenter）** | SDK | `python-backend/services/jqdata_adapter.py` 调用 `jq.get_price`（批量 200 只/批 + 单只）、`jq.get_all_securities`；仓库内嵌 `python-backend/jqdata_sdk/` 副本 | 按需（行情取数、均线计算、收盘快照回退） | `fetch_daily_data` 异常按批降级、返回空 DataFrame；未装 SDK 时记日志返回空 |
 | **资产沃土** | — | venv 已装 `jqdata_sdk` 但**代码未使用**（`jqdata` 仅作 `data_source` 字符串标签，见 `migrations/025`） | 无 | — |
-| **QuantLab（~/QuantLab）** | 无直接调用 | M2（2026-08-21）落地：QuantLab 经自有 quantlab-data 服务（D :8011，读 `ts_full.db`）取数，**不调用** jqdata-api/SDK；原"规划中经薄适配层接入"未实施 | 无 | — |
+| **QuantLab（~/QuantLab）** | HTTP（签名） | ① 取数：M2（2026-08-21）起经自有 quantlab-data 服务（D :8011）读 `ts_full.db`，**不直接调用** jqdata-api/SDK；② **证券名称字典**（2026-09-16 起）：B 机 `scripts/refresh_stock_names.py`（`quantlab-stock-names.timer` 每月 1 日）签名调 **`/v1/securities`**，真源 security_info（stock+etf 全量+宽基指数白名单 5 只），生成 `stock_names.json` 供自选股/行情展示 | 每月 1 次（名称字典）；M5 对账上线后扩面 | 脚本失败非零退出、保留旧 `stock_names.json` 不覆盖（宁可旧数据不静默降级）。镜像登记见 QuantLab `docs/upstream-deps.md` §2 |
 | **资产管家（A 机 106.14.141.212）** | ~~HTTP/SDK~~ | **已正式注销消费（2026-08-20）**：实测 2026-07-27 起零调用；此前漏登记，补录即注销 | 无 | — |
 | **live-171（171 服务器策略研发）** | 未知 | 用户提供的消费线索；远程服务器，本仓库无法核对；171 退役排队中 | 待确认 | — |
 
