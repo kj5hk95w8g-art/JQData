@@ -1,7 +1,7 @@
 # JQData 本地行情数据平台 — AI 助手操作约束
 
 > 本文档是 AI 助手的**强制性操作约束手册**。违反任何红线规则 → 立即停止操作。
-> 通用规则继承 `~/.ai-rules/`（全量），本文档只包含 **JQData 特有规则**。
+> 适用范围：JQData 仓全部检出环境 + 本项目部署机（C/D 及 A 上 node-exporter）；通用规则继承 `~/.ai-rules/`（全量），本文档只包含 **JQData 特有规则**。
 >
 > 完整文档导航 → [`README.md`](./README.md)
 
@@ -28,7 +28,7 @@
 | 代号 | 角色 | 公网IP | 配置 | 部署内容 | 约束 |
 |------|------|--------|------|---------|------|
 | **A** | 应用服务器 | `106.14.141.212` | 4核 16GB | 资产沃土/云图中心（核心业务❌不动）+ **node-exporter（监控，经同意部署）** | 核心业务禁止部署新组件 |
-| **B** | 测试服务器 | `139.196.34.92` | 4核 16GB | **❌ 不动**（现有测试环境） | 禁止修改 |
+| **B** | 测试服务器 | `139.196.34.92` | 4核 16GB | 多项目共用测试机（沃土/管家/QuantLab 测试环境均在跑，如 test-quant.yuntuxaas.com） | **JQData 视角"❌ 不动"=不改动机器全局配置与既有业务部署物**；本项目在 B 机无部署物时不得新增任何组件，共享资源（端口/内存/磁盘）变更前先核对测试环境清单 |
 | **C** | 可视化/调度 | `139.196.186.67` | 4核 32GB | Grafana + Airflow（待建） | docker-compose，deploy 用户 |
 | **D** | 核心数据层 | `101.132.161.52` | 8核 64GB | ClickHouse + Redis + FastAPI + Nginx | docker-compose，deploy 用户 |
 
@@ -142,20 +142,17 @@ Host jqdata-d
 
 ## 七、Python 与测试规范
 
-通用规范见 `~/.ai-rules/`：
-
-- **`003-python.yml`**：配置走环境变量、新增环境变量同步 `.env.example`、公共函数类型注解建议、优先使用 logging、敏感信息禁止入代码库
-- **`006-testing.yml`**：核心逻辑单元测试覆盖率建议 > 70%、外部依赖必须 mock、数据计算类必须测试边界条件、每个任务交付前须有验收脚本、测试禁止使用生产数据
+通用规范见 `~/.ai-rules/`（`003-python.yml`：环境变量配置/.env.example 同步/类型注解/logging/敏感信息禁入代码库；`006-testing.yml`：覆盖率>70%/外部依赖 mock/边界条件/验收脚本/禁生产数据）——本节为纯复述不再展开，以全局两文件为权威。
 
 ---
 
 ## 八、AI Skill 速查
 
-> 通用 Skill 从 `~/.kimi/skills/` 自动加载；项目特有 Skill 从 `.agents/skills/` 加载。
+> 通用 Skill 真源 `~/.kimi-code/skills/`，跨 CLI 共享目录 `~/.agents/skills/`（软链；`~/.kimi/skills` 旧池已废弃禁引用）；项目特有 Skill 在本仓 `.agents/skills/`。
 
 | 场景 | 直接说 | Skill | 位置 |
 |------|--------|-------|------|
-| 检查代码 | "检查代码" / "review代码" | `code-quality-guard` | `~/.kimi/skills/` |
+| 检查代码 | "检查代码" / "review代码" | `code-quality-guard` | `~/.agents/skills/` |
 | 检查表结构 | "检查表结构" / "schema对不对" | `schema-validator` | `.agents/skills/` |
 | 数据同步检查 | "检查同步状态" / "今天数据齐了吗" | `sync-status-checker` | `.agents/skills/` |
 | 数据质量检查 | "检查数据质量" / "有没有缺数据" | `data-quality-checker` | `.agents/skills/` |
@@ -189,5 +186,4 @@ Host jqdata-d
 
 ---
 
-*最后更新：2026-05-12*  
-*版本：v2.3.0 — 瘦身：删除通用规则重复内容，引用 ~/.ai-rules/；增加公共 Skill 池引用*
+*最后更新：2026-11-10（AGENTS 巡检：头部补适用范围行；B 机"❌不动"按共用测试机现状澄清适用边界（QuantLab test-quant 在跑，与 QuantLab AGENTS 冲突消除）；§七去复述改指针；skill 路径统一 ~/.agents/skills）*
