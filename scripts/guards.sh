@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # guards.sh 模板 —— 通用提交守卫（block / warn 两级）
-# TEMPLATE_VERSION: 2
+# TEMPLATE_VERSION: 6
 #
 # 用法：
 #   bash guards.sh                 # 默认扫描 git staged 文件（pre-commit 用）
@@ -19,13 +19,30 @@
 #              但未触及 docs/ —— 提醒同步文档（不阻塞）
 #   5. [block·可选] 路由文件行数门禁：ROUTE_GLOB 非空时启用，超 ROUTE_MAX_LINES
 #              行即阻塞（防业务逻辑回流 route 层；管家 v3.3.24 Phase 3 下沉后固防）
+#   6. [warn ] 体积债预警（God file 防复发）：diff 触及的源码文件超
+#              SIZE_WARN_THRESHOLD 行（默认 800）且本次净增行 → 提醒拆分
+#              （不阻塞；净减行放行，鼓励渐进瘦身）
+#   7. [block·可选] 共享口径锚点 T1 硬拦截（REQ-145/ADR-0018）：diff 命中锚点
+#              函数定义区间 → 须同提交更新 docs/reviews/anchor-consumers.md，
+#              否则阻断（staged 模式专用；探测到 scripts/anchor_scan.py 与
+#              快照存在才启用，同 ROUTE_GLOB 可选模式）
+#   8. [warn ] 共享口径 T2 软提醒：diff 命中引用锚点的消费函数体 → 打印该口径
+#              全部消费点与"同页是否一致"提示（REQ-143 实际形态是消费方变更，
+#              只做 T1 拦不住）
+#
+#   9. [block·可选] 硬闸影子期制度（2026-09-23 拍板）：diff 新增 @gate(enforce, id)
+#              标注必须在 docs/gates/gate_registry.yml 有条目且含 calibration 校准记录，
+#              否则阻断；@gate(shadow, id) 未登记仅 warn（scripts/gate_shadow_guard.sh
+#              与 docs/gates/gate_registry.yml 同时存在才启用）。
 #
 # 注意：本文件是 ~/.ai-rules/enforcement/ 的模板源。项目实例由 sync-templates.sh
 # 同步；有本地扩展的项目（如管家 SQL 豁免标记）同步时人工 diff 合并，勿整文件覆盖。
 # check.py 巡检会比较 TEMPLATE_VERSION，实例落后会有提醒。
 
 # ---------- 文件列表 ----------
+EXPLICIT_MODE=0
 if [ $# -gt 0 ]; then
+    EXPLICIT_MODE=1
     FILES=("$@")
 else
     FILES=()
@@ -122,6 +139,88 @@ if [ -n "$ROUTE_GLOB" ]; then
                 ;;
         esac
     done
+fi
+
+# ---------- 体积债预警（God file 防复发，warn 不阻塞） ----------
+# 阈值可经环境变量覆盖：SIZE_WARN_THRESHOLD=600 bash guards.sh
+SIZE_WARN_THRESHOLD="${SIZE_WARN_THRESHOLD:-800}"
+for f in "${FILES[@]}"; do
+    echo "$f" | grep -qE '\.(py|ts|tsx)$' || continue
+    echo "$f" | grep -qE '(^|/)(tests?|__pycache__|venv|node_modules)/' && continue
+    basename "$f" | grep -qx 'guards.sh' && continue
+    [ -f "$f" ] || continue
+    LINES=$(wc -l < "$f" | tr -d ' ')
+    if [ "$LINES" -gt "$SIZE_WARN_THRESHOLD" ]; then
+        ADDED=$(git diff --cached --numstat -- "$f" 2>/dev/null | awk '{print $1}')
+        REMOVED=$(git diff --cached --numstat -- "$f" 2>/dev/null | awk '{print $2}')
+        NET=$(( ${ADDED:-0} - ${REMOVED:-0} ))
+        if [ "$NET" -gt 0 ]; then
+            echo "⚠️  [warn] $f 共 ${LINES} 行（超 ${SIZE_WARN_THRESHOLD}）且本次净增 ${NET} 行——建议顺手拆分，避免 God file 复发（项目技术债账本如有登记请回链）"
+        fi
+    fi
+done
+
+# ---------- 共享口径锚点守卫（REQ-145，T1 block / T2 warn，可选启用） ----------
+# 探测到扫描器 + 快照才启用（staged 模式专用：判定依赖 git diff --cached）
+# 锚点判定固定读 git diff --cached，仅在 staged 模式（pre-commit）运行，显式传参（CI）模式跳过
+if [ "$EXPLICIT_MODE" -eq 0 ] && [ -f "scripts/anchor_scan.py" ] && [ -f "scripts/anchor-symbols.generated.yaml" ] && command -v python3 >/dev/null 2>&1; then
+    echo "🔍 [block/warn] 共享口径锚点守卫（T1 锚点定义区间 / T2 消费函数体）..."
+    python3 scripts/anchor_scan.py --root . --format json 2>/dev/null \
+        | python3 scripts/anchor_guard_check.py
+    RC=$?
+    if [ "$RC" -eq 2 ]; then
+        BLOCKED=1
+    elif [ "$RC" -gt 2 ]; then
+        # 判定器自身故障（非命中）：按 fail-open 记 warn，不阻塞
+        echo "⚠️  [warn] anchor 守卫判定器异常退出（code=${RC}），本次跳过锚点检查"
+    fi
+fi
+
+# ---------- 9. 硬闸影子期（可选，gate_shadow_guard.sh + 登记表存在才启用） ----------
+if [ -f scripts/gate_shadow_guard.sh ] && [ -f docs/gates/gate_registry.yml ]; then
+    if [ $EXPLICIT_MODE -eq 1 ]; then
+        bash scripts/gate_shadow_guard.sh $FILES
+    else
+        bash scripts/gate_shadow_guard.sh
+    fi
+    RC=$?
+    if [ "$RC" -eq 2 ]; then
+        BLOCKED=1
+    elif [ "$RC" -gt 2 ]; then
+        echo "⚠️  [warn] gate_shadow_guard 异常退出（code=${RC}），本次跳过闸登记检查"
+    fi
+fi
+
+# ---------- 10. 吞异常扫描（shadow 起步，@gate(shadow, silent-exception-scan) ----------
+# 规则：observability.no_silent_exception / data_sync_error_visibility
+# 扫 diff 触及的 .py/.ts 中"捕获后什么都不做"：Python `except ...: pass`、TS 空 catch {}
+# 行内豁免：该行尾加 `# guard-ignore: silent-exception-scan`
+# 影子期：默认只 warn 不拦；校准零误报后设 GUARD_SILENT_EXCEPTION=enforce 转硬拦
+GATE_SILENT_EXCEPTION="${GUARD_SILENT_EXCEPTION:-shadow}"
+echo "🔍 [$GATE_SILENT_EXCEPTION] 吞异常扫描（except:pass / 空 catch）..."
+SE_HITS=0
+for f in "${FILES[@]}"; do
+    echo "$f" | grep -qE '\.(py|ts|tsx)$' || continue
+    echo "$f" | grep -qE '(^|/)(tests?|__pycache__|venv|node_modules)/' && continue
+    [ -f "$f" ] || continue
+    if echo "$f" | grep -qE '\.py$'; then
+        HITS=$(grep -nE 'except[^:]*:[[:space:]]*pass([[:space:]]+#.*)?$' "$f" | grep -v 'guard-ignore: silent-exception-scan' || true)
+    else
+        # TS 空 catch 块（catch (e) {} 单行形态；多行空块由 review 把关，正则不强求）
+        HITS=$(grep -nE 'catch[[:space:]]*(\([^)]*\))?[[:space:]]*\{[[:space:]]*\}([[:space:]]+//.*)?$' "$f" | grep -v 'guard-ignore: silent-exception-scan' || true)
+    fi
+    if [ -n "$HITS" ]; then
+        SE_HITS=$((SE_HITS + 1))
+        echo "$HITS" | sed "s|^|          $f:|"
+    fi
+done
+if [ "$SE_HITS" -gt 0 ]; then
+    if [ "$GATE_SILENT_EXCEPTION" = "enforce" ]; then
+        BLOCKED=1
+        echo "❌ [block] 发现 ${SE_HITS} 个文件存在吞异常（异常至少记录日志；豁免加行内注释 # guard-ignore: silent-exception-scan）"
+    else
+        echo "⚠️  [shadow] 发现 ${SE_HITS} 个文件存在吞异常——影子期只提醒不拦截，校准记录见 docs/gates/gate_registry.yml"
+    fi
 fi
 
 # ---------- 汇总 ----------
