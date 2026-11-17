@@ -7,7 +7,7 @@
 > 互为镜像（双向登记，改任一处须同步另一处）。
 > **配套防线**：`tests/test_api_contract_smoke.py`（HTTP 路由/认证/JSON 形状源码契约）
 > 与 `tests/test_sdk_contract_smoke.py`（SDK↔HTTP 跨契约）。
-> **最后核对日期**：2026-08-11（核对人：AI 辅助，据各项目代码 grep 核对）
+> **最后核对日期**：2026-08-21（M6 sqlite 化切流后核对）
 
 ---
 
@@ -15,8 +15,8 @@
 
 | 项 | 值 |
 |----|----|
-| 服务 | FastAPI `src/main.py`（`jqdata-api` 容器，:8000 仅容器内） |
-| 对外入口 | Nginx `18080`（D 服务器 `101.132.161.52`） |
+| 服务 | FastAPI `src/main_sqlite.py`（`jqdata-api-sqlite.service` systemd，sqlite 后端；2026-08-20 M6 起替代 ClickHouse 容器栈） |
+| 对外入口 | uvicorn 直挂 `18080`（D 服务器 `101.132.161.52`，Nginx/ClickHouse/Redis 容器已退役） |
 | 认证 | 请求签名：`X-Timestamp` + `X-Signature`（`md5(SALT+timestamp)`）；除 `/health` 外全部要求 |
 | 数据范围 | 金融数据仅限内网（VPC `172.24.52.0/24`），禁止外发公网 |
 
@@ -69,8 +69,9 @@ Python SDK `src/sdk/jqdata_sdk`（`import jqdata_sdk as jq`，自动附加签名
 |--------|---------|------|---------|---------|
 | **云图中心（yuntuCenter）** | SDK | `python-backend/services/jqdata_adapter.py` 调用 `jq.get_price`（批量 200 只/批 + 单只）、`jq.get_all_securities`；仓库内嵌 `python-backend/jqdata_sdk/` 副本 | 按需（行情取数、均线计算、收盘快照回退） | `fetch_daily_data` 异常按批降级、返回空 DataFrame；未装 SDK 时记日志返回空 |
 | **资产沃土** | — | venv 已装 `jqdata_sdk` 但**代码未使用**（`jqdata` 仅作 `data_source` 字符串标签，见 `migrations/025`） | 无 | — |
-| **QuantLab（~/QuantLab）** | 规划中 | 架构文档 `docs/design/architecture-evolution.md` 计划经 D 机薄适配层接入（`/api/data/daily`、`/api/data/index-daily` 协议），**尚未直接调用** jqdata-api/SDK | 规划中 | — |
-| **live-171（171 服务器策略研发）** | 未知 | 用户提供的消费线索；远程服务器，本仓库无法核对 | 待确认 | — |
+| **QuantLab（~/QuantLab）** | 无直接调用 | M2（2026-08-21）落地：QuantLab 经自有 quantlab-data 服务（D :8011，读 `ts_full.db`）取数，**不调用** jqdata-api/SDK；原"规划中经薄适配层接入"未实施 | 无 | — |
+| **资产管家（A 机 106.14.141.212）** | ~~HTTP/SDK~~ | **已正式注销消费（2026-08-20）**：实测 2026-07-27 起零调用；此前漏登记，补录即注销 | 无 | — |
+| **live-171（171 服务器策略研发）** | 未知 | 用户提供的消费线索；远程服务器，本仓库无法核对；171 退役排队中 | 待确认 | — |
 
 > **风险提示**：`valuation/detail`-类查询、`/v1/query_count` 目前无外部消费方（内部统计）。
 > 消费方最多的是 `get_price`（云图中心行情主通道），其对应端点 `/v1/daily/{code}`、
@@ -95,3 +96,4 @@ Python SDK `src/sdk/jqdata_sdk`（`import jqdata_sdk as jq`，自动附加签名
 | 日期 | 变更 |
 |------|------|
 | 2026-08-11 | 首次建立本登记册；新增 HTTP 契约冒烟 `tests/test_api_contract_smoke.py` 与 SDK 跨契约 `tests/test_sdk_contract_smoke.py`；据 yuntuCenter/资产沃土/QuantLab 代码核对消费方 |
+| 2026-08-21 | M6 平台 sqlite 化：`main_sqlite.py` + systemd 上线 :18080，ClickHouse/Redis/Nginx 容器退役；补录资产管家行并标记注销（7/27 起零调用）；QuantLab 行更正为"无直接调用"（M2 经自有 quantlab-data :8011 取数） |
